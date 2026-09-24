@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Operations Agent | Control Center</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">AI</div>
+            <div>
+                <h1>AI Operations Agent</h1>
+                <p>Natural language → validated tool → database operation</p>
+            </div>
+        </div>
+        <div class="system-status">
+            <span class="status-dot"></span>
+            <span>System Online</span>
+            <span class="api-label">FastAPI + LangGraph</span>
+        </div>
+    </header>
+
+    <nav class="main-tabs">
+        <button class="tab-btn active" onclick="switchTab('agentTab')">🤖 Agent Control</button>
+        <button class="tab-btn" onclick="switchTab('dataTab')">🗄️ Live Data</button>
+        <button class="tab-btn" onclick="switchTab('historyTab')">📋 Task History</button>
+    </nav>
+
+    <!-- AGENT TAB -->
+    <main id="agentTab" class="tab-content active">
+        <!-- LLM PROVIDER SECTION -->
+        <section id="providerSetupCard" class="card" style="margin-bottom: 24px;">
+            <div class="card-title">LLM Provider Configuration</div>
+            <div id="providerSetupForm">
+                <div class="input-group" style="margin-bottom: 16px;">
+                    <label for="providerSelect" style="display:block; margin-bottom: 8px;">LLM Provider</label>
+                    <select id="providerSelect" style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; width: 100%; max-width: 300px;">
+                        <option value="">Select Provider</option>
+                        <option value="OpenAI">OpenAI</option>
+                        <option value="Groq">Groq</option>
+                    </select>
+                </div>
+                <div class="input-group" style="margin-bottom: 16px;">
+                    <label for="apiKeyInput" style="display:block; margin-bottom: 8px;">API Key</label>
+                    <input type="password" id="apiKeyInput" placeholder="Enter your API key" style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; width: 100%; max-width: 300px;">
+                </div>
+                <button class="primary-btn" onclick="connectProvider()">Connect / Start Agent</button>
+                <div id="providerError" style="color: #e74c3c; margin-top: 12px; display: none;"></div>
+            </div>
+            <div id="providerConnectedState" style="display: none; align-items: center; justify-content: space-between;">
+                <div>
+                    <div style="font-weight: 600;">Provider: <span id="connectedProviderName"></span></div>
+                    <div style="font-weight: 600; margin-top: 2px;">Model: <span id="connectedModelName" style="color: #555;"></span></div>
+                    <div style="color: #27ae60; font-size: 0.9em; margin-top: 4px;">Status: Connected</div>
+                    <div id="providerSuccessMsg" style="color: #27ae60; font-size: 0.9em; margin-top: 2px;"></div>
+                </div>
+                <button class="secondary-btn" onclick="changeProvider()">Change Provider</button>
+            </div>
+        </section>
+
+        <section class="hero-card" id="heroCardSection" style="opacity: 0.5; pointer-events: none;">
+            <div>
+                <span class="eyebrow">AI OPERATIONS DEMO</span>
+                <h2>Ask the agent to perform an operational task</h2>
+                <p>Try a real database-backed request. The panels below make every decision and data change visible to an interviewer.</p>
+            </div>
+            <div class="quick-actions">
+                <button onclick="useExample('Check the status of order 5003')">Check order</button>
+                <button onclick="useExample('Create a critical support ticket for customer 101 because payment failed')">Critical ticket</button>
+                <button onclick="useExample('Update email for customer 101 to newmail@example.com')">Update email</button>
+                <button onclick="useExample('What is the return policy for lost packages?')">Ask policy question</button>
+            </div>
+        </section>
+
+        <section class="request-card" id="requestCardSection" style="opacity: 0.5; pointer-events: none;">
+            <label for="requestInput">Operational request</label>
+            <div class="input-group">
+                <input type="text" id="requestInput" value="Check the status of order 5003"
+                       placeholder="e.g. Check the status of order 5003">
+                <button class="primary-btn" onclick="executeTask()">Run Agent →</button>
+            </div>
+        </section>
+
+        <section id="dashboardGrid" class="dashboard-grid">
+            <div class="card analysis-card">
+                <div class="card-title">
+                    <div>
+                        <span class="section-kicker">01 · UNDERSTAND</span>
+                        <h3>🧠 AI Decision</h3>
+                    </div>
+                    <span id="taskStatus" class="badge">READY</span>
+                </div>
+
+                <div class="decision-grid">
+                    <div class="metric-box">
+                        <span>Detected intent</span>
+                        <strong id="taskIntent">—</strong>
+                    </div>
+                    <div class="metric-box">
+                        <span>Selected tool</span>
+                        <strong id="selectedTool">—</strong>
+                    </div>
+                </div>
+
+                <div class="data-block">
+                    <div class="block-label">Extracted parameters</div>
+                    <div id="parameterChips" class="parameter-chips">
+                        <span class="empty-state">Run a request to see extracted data</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card workflow-card">
+                <div class="card-title">
+                    <div>
+                        <span class="section-kicker">02 · EXECUTE</span>
+                        <h3>⚙️ Agent Workflow</h3>
+                    </div>
+                    <span id="workflowLabel" class="muted">Waiting</span>
+                </div>
+
+                <div class="pipeline">
+                    <div class="step" id="step-intent"><span>1</span><b>Intent</b><small>Parse request</small></div>
+                    <div class="connector"></div>
+                    <div class="step" id="step-validate"><span>2</span><b>Validate</b><small>Business rules</small></div>
+                    <div class="connector"></div>
+                    <div class="step" id="step-tool"><span>3</span><b>Tool</b><small>Select action</small></div>
+                    <div class="connector"></div>
+                    <div class="step" id="step-execute"><span>4</span><b>Database</b><small>Commit change</small></div>
+                </div>
+
+                <div id="humanApproval" class="approval-box" style="display:none;">
+                    <div class="approval-icon">⚠️</div>
+                    <div>
+                        <strong>Human approval required</strong>
+                        <p>Critical operations are paused before database execution.</p>
+                    </div>
+                    <div class="approval-buttons">
+                        <button class="approve-btn" onclick="approveTask()">Approve</button>
+                        <button class="reject-btn" onclick="rejectTask()">Reject</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card result-card">
+                <div class="card-title">
+                    <div>
+                        <span class="section-kicker">03 · OUTCOME</span>
+                        <h3>✅ Operation Result</h3>
+                    </div>
+                </div>
+                <div id="resultSummary" class="result-summary">
+                    <span class="empty-state">No operation executed yet.</span>
+                </div>
+                <details class="raw-details">
+                    <summary>View raw tool response</summary>
+                    <pre id="taskResult" class="code-block">{}</pre>
+                </details>
+            </div>
+
+            <div class="card impact-card">
+                <div class="card-title">
+                    <div>
+                        <span class="section-kicker">04 · EVIDENCE</span>
+                        <h3>📊 Data Impact</h3>
+                    </div>
+                    <button class="ghost-btn" onclick="switchTab('dataTab')">Open live database →</button>
+                </div>
+                <div class="impact-grid">
+                    <div class="impact-stat"><strong id="ordersCount">—</strong><span>Orders</span></div>
+                    <div class="impact-stat"><strong id="ticketsCount">—</strong><span>Tickets</span></div>
+                    <div class="impact-stat"><strong id="customersCount">—</strong><span>Customers</span></div>
+                    <div class="impact-stat"><strong id="notificationsCount">—</strong><span>Notifications</span></div>
+                </div>
+                <div id="impactMessage" class="impact-message">The live data view will show exactly what changed.</div>
+            </div>
+
+            <div class="card logs-card">
+                <div class="card-title">
+                    <div>
+                        <span class="section-kicker">05 · TRACEABILITY</span>
+                        <h3>📜 Audit Trail</h3>
+                    </div>
+                    <span id="logCount" class="muted">0 events</span>
+                </div>
+                <div id="logList" class="timeline">
+                    <div class="empty-state">Audit events will appear here after execution.</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- DATA TAB -->
+    <main id="dataTab" class="tab-content">
+        <section class="page-heading">
+            <div>
+                <span class="eyebrow">DATABASE EXPLORER</span>
+                <h2>Live operational data</h2>
+                <p>This is the evidence layer of the demo: records are loaded from the application's database and refresh after agent actions.</p>
+            </div>
+            <button class="primary-btn" onclick="refreshDatabaseView()">↻ Refresh</button>
+        </section>
+
+        <section class="data-overview">
+            <div class="overview-stat"><span>Customers</span><strong id="dbCustomersCount">0</strong></div>
+            <div class="overview-stat"><span>Orders</span><strong id="dbOrdersCount">0</strong></div>
+            <div class="overview-stat"><span>Support tickets</span><strong id="dbTicketsCount">0</strong></div>
+            <div class="overview-stat"><span>Notifications</span><strong id="dbNotificationsCount">0</strong></div>
+        </section>
+
+        <section class="table-grid">
+            <div class="card table-card wide">
+                <div class="table-heading"><h3>📦 Orders</h3><span>orders</span></div>
+                <div class="table-wrap">
+                    <table id="ordersTable">
+                        <thead><tr><th>ID</th><th>Customer</th><th>Status</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card table-card">
+                <div class="table-heading"><h3>👥 Customers</h3><span>customers</span></div>
+                <div class="table-wrap">
+                    <table id="customersTable">
+                        <thead><tr><th>ID</th><th>Name</th><th>Email</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card table-card">
+                <div class="table-heading"><h3>🎫 Support Tickets</h3><span>support_tickets</span></div>
+                <div class="table-wrap">
+                    <table id="ticketsTable">
+                        <thead><tr><th>ID</th><th>Customer</th><th>Issue</th><th>Priority</th><th>Status</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card table-card wide">
+                <div class="table-heading"><h3>🔔 Notifications</h3><span>notifications</span></div>
+                <div class="table-wrap">
+                    <table id="notificationsTable">
+                        <thead><tr><th>ID</th><th>Customer</th><th>Message</th><th>Status</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- HISTORY TAB -->
+    <main id="historyTab" class="tab-content">
+        <section class="page-heading">
+            <div>
+                <span class="eyebrow">AUDIT & HISTORY</span>
+                <h2>Previous agent tasks</h2>
+                <p>A quick interview-friendly view of what the agent has processed.</p>
+            </div>
+            <button class="primary-btn" onclick="loadTaskHistory()">↻ Refresh</button>
+        </section>
+
+        <section class="card history-card">
+            <div class="table-wrap">
+                <table id="historyTable">
+                    <thead><tr><th>Task</th><th>Request</th><th>Intent</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>AI Operations Agent</span>
+        <span>FastAPI · LangGraph · SQLAlchemy · Human-in-the-loop · Audit logging</span>
+    </footer>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
