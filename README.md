@@ -229,3 +229,5 @@ Try these commands directly in the Streamlit UI or via `curl`:
 
 ---
 
+## License
+MIT License. Built for production demonstration and technical portfolio review.

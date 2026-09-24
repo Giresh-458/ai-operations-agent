@@ -19,6 +19,8 @@ services:
     build: .
     ports:
       - "8080:8080"
+    volumes:
+      - .:/app
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/operations_agent
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -37,6 +39,8 @@ services:
     build: .
     ports:
       - "8501:8501"
+    volumes:
+      - .:/app
     environment:
       - BACKEND_URL=http://web:8080
     command: streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
