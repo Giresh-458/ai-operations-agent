@@ -44,8 +44,10 @@ def seed_data():
         Customer(id=104, name="Neha", email="neha@example.com"),
         Customer(id=105, name="Amit", email="amit@example.com"),
     ]
-    if db.query(Customer).count() == 0:
-        db.add_all(customers)
+    existing_customer_ids = {row[0] for row in db.query(Customer.id).all()}
+    missing_customers = [row for row in customers if row.id not in existing_customer_ids]
+    if missing_customers:
+        db.add_all(missing_customers)
         db.commit()
 
     # Seed Orders
@@ -56,8 +58,10 @@ def seed_data():
         Order(id=5004, customer_id=104, status="CANCELLED"),
         Order(id=5005, customer_id=105, status="PENDING"),
     ]
-    if db.query(Order).count() == 0:
-        db.add_all(orders)
+    existing_order_ids = {row[0] for row in db.query(Order.id).all()}
+    missing_orders = [row for row in orders if row.id not in existing_order_ids]
+    if missing_orders:
+        db.add_all(missing_orders)
         db.commit()
     
     # Seed Tickets
@@ -65,16 +69,20 @@ def seed_data():
         SupportTicket(id=1, customer_id=101, issue="Login issue", priority="LOW"),
         SupportTicket(id=2, customer_id=102, issue="Payment failed", priority="HIGH"),
     ]
-    if db.query(SupportTicket).count() == 0:
-        db.add_all(tickets)
+    existing_ticket_ids = {row[0] for row in db.query(SupportTicket.id).all()}
+    missing_tickets = [row for row in tickets if row.id not in existing_ticket_ids]
+    if missing_tickets:
+        db.add_all(missing_tickets)
         db.commit()
 
     notifications = [
         Notification(id=1, customer_id=101, message="Your order has shipped.", status="SENT"),
         Notification(id=2, customer_id=102, message="Your order is being processed.", status="SENT"),
     ]
-    if db.query(Notification).count() == 0:
-        db.add_all(notifications)
+    existing_notification_ids = {row[0] for row in db.query(Notification.id).all()}
+    missing_notifications = [row for row in notifications if row.id not in existing_notification_ids]
+    if missing_notifications:
+        db.add_all(missing_notifications)
         db.commit()
     
     # Seed Knowledge Base
