@@ -384,7 +384,7 @@ def final_response(state: AgentState) -> AgentState:
             elif state.get("intent") == "CREATE_TICKET":
                 state["final_response"] = f"Ticket {result.get('ticket_id')} created."
             elif state.get("intent") == "UPDATE_EMAIL":
-                state["final_response"] = f"Customer {result.get('customer_id')} email updated to {result.get('new_email')}."
+                state["final_response"] = f"Customer {result.get('customer_id')} email updated successfully."
             elif state.get("intent") == "SEND_NOTIFICATION":
                 state["final_response"] = f"Notification {result.get('notification_id')} sent."
             else:
@@ -422,7 +422,7 @@ def retrieve_docs(state: AgentState) -> AgentState:
     state["search_query"] = query
     
     try:
-        log_audit(db, task_id, "RAG_RETRIEVE", "STARTED", query)
+        log_audit(db, task_id, "RAG_RETRIEVE", "STARTED", "Knowledge query received; text redacted")
         
         # Try Vector Search
         from app.config import settings
@@ -526,7 +526,7 @@ def rewrite_query(state: AgentState) -> AgentState:
         
         state["search_query"] = result.content.strip()
         state["retry_count"] += 1
-        log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", state["search_query"])
+        log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", "Query rewritten; text redacted")
     except Exception:
         state["retry_count"] = state.get("retry_count", 0) + 1
         log_audit(db, task_id, "RAG_REWRITE", "FAILED", "Query rewrite failed")
