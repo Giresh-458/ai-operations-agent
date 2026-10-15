@@ -3,6 +3,8 @@ let previousSnapshot = null;
 let currentProvider = null;
 let currentApiKey = null;
 let currentAccessToken = null;
+let pendingIdempotencyKey = null;
+let pendingIdempotencyRequest = null;
 
 // Attach the shared API token to same-origin API requests without persisting it.
 // The token remains in page memory and is cleared when the provider connection is reset.
@@ -206,9 +208,15 @@ async function executeTask() {
     document.getElementById('logList').innerHTML = '<div class="empty-state">Loading audit trail…</div>';
 
     try {
+        // Reuse the key after a network/response failure so a user retry cannot
+        // repeat a mutation whose first response was lost.
+        if (!pendingIdempotencyKey || pendingIdempotencyRequest !== request) {
+            pendingIdempotencyKey = crypto.randomUUID();
+            pendingIdempotencyRequest = request;
+        }
         const response = await fetch('/tasks', {
             method: 'POST',
-            headers: {'Content-Type':'application/json'},
+            headers: {'Content-Type':'application/json', 'Idempotency-Key': pendingIdempotencyKey},
             body: JSON.stringify({
                 request: request,
                 provider: currentProvider,
@@ -217,6 +225,8 @@ async function executeTask() {
         });
         if (!response.ok) throw new Error(await response.text());
         const data = await response.json();
+        pendingIdempotencyKey = null;
+        pendingIdempotencyRequest = null;
         currentTaskId = data.task_id;
         updateUI(data);
         await fetchLogs(currentTaskId);
