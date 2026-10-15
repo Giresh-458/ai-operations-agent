@@ -21,3 +21,9 @@ Thumbs.db
 # IDEs and Editors
 .vscode/
 .idea/
+
+# Local test artifacts
+test.db
+test.db-shm
+test.db-wal
+.pytest_cache/
