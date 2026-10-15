@@ -30,6 +30,8 @@ jobs:
           python -m pip install -r requirements.txt pytest httpx
       - name: Run tests
         run: pytest -q
+      - name: Run offline evaluation smoke suite
+        run: python scripts/run_evals.py
 
   postgres:
     name: PostgreSQL checkpoint and API tests
@@ -66,3 +68,5 @@ jobs:
           python -m pip install -r requirements.txt pytest httpx
       - name: Run tests against PostgreSQL
         run: pytest -q
+      - name: Run offline evaluation smoke suite against PostgreSQL
+        run: python scripts/run_evals.py
