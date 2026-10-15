@@ -119,3 +119,11 @@ def test_rejected_critical_ticket_never_executes():
     assert len(client.get("/database").json()["tickets"]) == before_tickets
     duplicate_rejection = client.post(f"/tasks/{task_id}/reject")
     assert duplicate_rejection.status_code == 409
+
+
+def test_rag_refuses_when_no_relevant_evidence_exists():
+    response = client.post("/tasks", json={"request": "What is the warranty duration for bananas?"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "KNOWLEDGE_QUERY"
+    assert "could not find enough relevant information" in data["result"]["message"].lower()
