@@ -278,7 +278,17 @@ def reject_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Rejection processing failed; inspect task status and audit log.") from exc
     db.expire_all()
     task = db.query(Task).filter(Task.id == task_id).first()
-    return {"status": task.status if task else "REJECTED"}
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskResponse(
+        task_id=task.id,
+        status=task.status,
+        intent=task.intent,
+        selected_tool=task.intent,
+        parameters=json.loads(task.parameters) if task.parameters else {},
+        result=json.loads(task.result) if task.result else None,
+        requires_human=task.requires_human,
+    )
 
 
 @router.get('/database')
