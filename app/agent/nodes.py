@@ -99,8 +99,8 @@ def _redact_persisted_parameters(parameters):
     safe = dict(parameters)
     for key, value in safe.items():
         if isinstance(value, str):
-            value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
-            value = re.sub(r"\b\d{4}(?:[- ]\d{4}){3}\b", "[REDACTED_CARD_NUMBER]", value)
+            value = re.sub(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)", "[REDACTED_SSN]", value)
+            value = re.sub(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", "[REDACTED_CARD_NUMBER]", value)
             value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
             safe[key] = value
     return safe
@@ -164,7 +164,7 @@ Format instructions:
             elif "email" in req_lower:
                 intent = "UPDATE_EMAIL"
                 customer_match = re.search(r"customer\s*(?:id|#)?\s*(\d+)", req_lower)
-                email_match = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", req_lower)
+                email_match = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", get_runtime_request(state), re.I)
                 params = {
                     "customer_id": int(customer_match.group(1)) if customer_match else 101,
                     "new_email": email_match.group(0) if email_match else "example@gmail.com"
@@ -188,12 +188,12 @@ Format instructions:
             output = chain.invoke({"request": get_runtime_request(state), "format_instructions": parser.get_format_instructions()})
             
         state["intent"] = output.intent
-        safe_parameters = dict(output.parameters or {})
+        raw_parameters = dict(output.parameters or {})
         # Keep the actual email only in process memory for the immediate tool call.
-        new_email = safe_parameters.get("new_email")
+        new_email = raw_parameters.get("new_email")
         if isinstance(new_email, str) and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
             set_runtime_sensitive_parameter(task_id, "new_email", new_email)
-            safe_parameters["new_email"] = "[REDACTED_EMAIL]"
+        safe_parameters = _redact_persisted_parameters(raw_parameters)
         state["parameters"] = safe_parameters
         update_task_status(db, task_id, "VALIDATING", intent=output.intent, parameters=safe_parameters)
         log_audit(db, task_id, "INTENT_DETECTED", "SUCCESS", json.dumps({"intent": output.intent}))
