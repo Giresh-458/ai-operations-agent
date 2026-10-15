@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import Base, engine, SessionLocal
 from scripts.seed_database import seed_data
-from app.models.database_models import Task, SupportTicket
+from app.models.database_models import Task, SupportTicket, Notification
 from app.agent.nodes import validate_request
 from app.config import settings
 from app.api import routes
@@ -118,6 +118,9 @@ def test_update_email():
     assert data["intent"] == "UPDATE_EMAIL"
     assert "example@gmail.com" not in data["result"]["message"]
     assert data["parameters"]["new_email"] == "[REDACTED_EMAIL]"
+    checkpoint = routes.agent_app.get_state({"configurable": {"thread_id": str(data["task_id"])}})
+    assert "example@gmail.com" not in checkpoint.values.get("user_request", "")
+    assert checkpoint.values.get("parameters", {}).get("new_email") == "[REDACTED_EMAIL]"
     db = SessionLocal()
     try:
         stored_task = db.query(Task).filter(Task.id == data["task_id"]).first()
@@ -356,3 +359,41 @@ def test_approval_restores_transient_provider_key(monkeypatch):
     assert clear_calls == [task_id]
     assert len(invoke_calls) == 1
     assert invoke_calls[0][1]["configurable"]["thread_id"] == str(task_id)
+
+
+def test_idempotency_key_returns_original_task_without_repeating_mutation():
+    before = len(client.get("/database").json()["tickets"])
+    headers = {"Idempotency-Key": "ticket-retry-0001"}
+    payload = {"request": "Create a high priority support ticket for customer 101"}
+    first = client.post("/tasks", json=payload, headers=headers)
+    second = client.post("/tasks", json=payload, headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["task_id"] == first.json()["task_id"]
+    assert len(client.get("/database").json()["tickets"]) == before + 1
+
+
+def test_idempotency_key_rejects_different_payload():
+    headers = {"Idempotency-Key": "request-key-0002"}
+    first = client.post("/tasks", json={"request": "Check order 5001"}, headers=headers)
+    assert first.status_code == 200
+    conflict = client.post("/tasks", json={"request": "Check order 5002"}, headers=headers)
+    assert conflict.status_code == 409
+
+
+def test_idempotency_key_format_is_validated():
+    response = client.post("/tasks", json={"request": "Check order 5001"}, headers={"Idempotency-Key": "bad"})
+    assert response.status_code == 422
+
+
+def test_notification_is_not_misreported_as_delivered():
+    response = client.post("/tasks", json={"request": "Send notification to customer 101 say Hello"})
+    assert response.status_code == 200
+    assert "simulated" in response.json()["result"]["message"].lower()
+    db = SessionLocal()
+    try:
+        row = db.query(Notification).order_by(Notification.id.desc()).first()
+        assert row is not None
+        assert row.status == "SIMULATED"
+    finally:
+        db.close()
