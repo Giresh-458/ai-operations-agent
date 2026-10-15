@@ -138,7 +138,9 @@ ai-operations-agent/
 ```bash
 cp .env.example .env
 ```
-*(Optional: You can supply keys in `.env` or enter them dynamically in the Streamlit UI at runtime.)*
+Before starting, replace `API_ACCESS_TOKEN` in `.env` with a long, random secret. The API rejects operational requests when this token is missing or still set to the example placeholder. The Streamlit service receives the same token through Docker Compose. Set `CORS_ORIGINS` to the exact browser origins you use.
+
+*(The LLM provider key can be supplied in `.env` or entered dynamically in the Streamlit UI at runtime.)*
 
 ### 2. Build and Launch
 ```bash
