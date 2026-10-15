@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.database import Base, engine, SessionLocal
 from scripts.seed_database import seed_data
-from app.models.database_models import Task
+from app.models.database_models import Task, SupportTicket
 from app.agent.nodes import validate_request
 from app.config import settings
 from app.api import routes
@@ -33,6 +33,47 @@ def test_health():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_readiness_checks_database_without_api_token():
+    response = unauthenticated_client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_static_dashboard_is_public_but_operational_api_is_protected():
+    page = unauthenticated_client.get("/app/index.html")
+    assert page.status_code == 200
+    assert "apiAccessTokenInput" in page.text
+
+    protected = unauthenticated_client.get("/database")
+    assert protected.status_code == 401
+
+
+def test_database_explorer_redacts_sensitive_ticket_issue():
+    db = SessionLocal()
+    ticket = SupportTicket(
+        customer_id=101,
+        issue="Caller SSN 123-45-6789",
+        priority="LOW",
+        status="OPEN",
+    )
+    try:
+        db.add(ticket)
+        db.commit()
+        db.refresh(ticket)
+        ticket_id = ticket.id
+
+        response = client.get("/database")
+        assert response.status_code == 200
+        ticket_view = next(row for row in response.json()["tickets"] if row["id"] == ticket_id)
+        assert "123-45-6789" not in ticket_view["issue"]
+        assert "[REDACTED_SSN]" in ticket_view["issue"]
+    finally:
+        if ticket.id:
+            db.delete(ticket)
+            db.commit()
+        db.close()
 
 def test_check_order():
     response = client.post("/tasks", json={"request": "Check the status of order 5001"})
