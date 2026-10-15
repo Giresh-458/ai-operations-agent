@@ -39,6 +39,7 @@ GROQ_MODEL=openai/gpt-oss-120b
 LANGCHAIN_TRACING_V2=false
 LANGCHAIN_API_KEY=
 LANGCHAIN_PROJECT=AIOpsAgent
+ALLOW_OFFLINE_MODE=false
 ```
 
 Generate secrets instead of copying the placeholders. For example:
@@ -47,7 +48,7 @@ Generate secrets instead of copying the placeholders. For example:
 openssl rand -hex 32
 ```
 
-Use one generated value for `POSTGRES_PASSWORD` and a separate generated value for `API_ACCESS_TOKEN`. Set `CORS_ORIGINS` to the exact browser origins that need access; do not use a wildcard. The Streamlit UI receives `API_ACCESS_TOKEN` as `BACKEND_API_TOKEN` through Compose. Provider API keys can be entered at runtime in the UI or supplied through the environment.
+Use one generated value for `POSTGRES_PASSWORD` and a separate generated value for `API_ACCESS_TOKEN`. Set `CORS_ORIGINS` to the exact browser origins that need access; do not use a wildcard. The Streamlit UI receives `API_ACCESS_TOKEN` as `BACKEND_API_TOKEN` through Compose. Provider API keys can be entered at runtime in the UI or supplied through the environment. Keep `ALLOW_OFFLINE_MODE=false` outside isolated local tests; otherwise deterministic mock intent parsing could execute demo database operations without a real provider credential.
 
 ### Launch and verify
 
