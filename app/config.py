@@ -1,5 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     API_ACCESS_TOKEN: str = os.getenv("API_ACCESS_TOKEN", "")
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:8501,http://127.0.0.1:8501")
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
