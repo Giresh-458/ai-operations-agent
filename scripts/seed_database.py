@@ -9,6 +9,19 @@ from app.database import SessionLocal, engine, Base
 from app.models.database_models import Customer, Order, SupportTicket, Notification, KnowledgeArticle
 import json
 
+
+def sync_postgres_sequences():
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        for table_name in ("customers", "orders", "support_tickets", "notifications", "tasks", "audit_logs", "knowledge_articles"):
+            conn.execute(text(
+                f"SELECT setval(pg_get_serial_sequence('{table_name}', 'id'), "
+                f"COALESCE((SELECT MAX(id) FROM {table_name}), 1), "
+                f"EXISTS (SELECT 1 FROM {table_name}))"
+            ))
+
+
 def seed_data():
     if engine.dialect.name == "postgresql":
         with engine.connect() as conn:
@@ -16,6 +29,8 @@ def seed_data():
             conn.commit()
 
     Base.metadata.create_all(bind=engine)
+    # Repair databases seeded by earlier versions before the early return.
+    sync_postgres_sequences()
     db = SessionLocal()
     
     if db.query(Customer).count() > 0:
@@ -87,16 +102,8 @@ def seed_data():
                 db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
             db.commit()
 
-    # Explicit seed IDs do not advance PostgreSQL serial sequences. Reset the
-    # sequences so runtime-created tickets and notifications cannot collide.
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as conn:
-            for table_name in ("customers", "orders", "support_tickets", "notifications", "tasks", "audit_logs", "knowledge_articles"):
-                conn.execute(text(
-                    f"SELECT setval(pg_get_serial_sequence('{table_name}', 'id'), "
-                    f"COALESCE((SELECT MAX(id) FROM {table_name}), 1), "
-                    f"EXISTS (SELECT 1 FROM {table_name}))"
-                ))
+    sync_postgres_sequences()
+
 
     print("Database seeded successfully.")
     db.close()
