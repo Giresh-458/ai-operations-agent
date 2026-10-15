@@ -428,8 +428,12 @@ def grade_docs(state: AgentState) -> AgentState:
             
         active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
-            state["is_relevant"] = True
-            log_audit(db, task_id, "RAG_GRADE", "SUCCESS", "Mock relevance: True")
+            query_terms = _query_terms(query)
+            required_overlap = min(2, len(query_terms))
+            relevant_docs = [doc for doc in docs if required_overlap > 0 and _lexical_score(query, doc.get("title", ""), doc.get("content", "")) >= required_overlap]
+            state["documents"] = relevant_docs
+            state["is_relevant"] = bool(relevant_docs)
+            log_audit(db, task_id, "RAG_GRADE", "SUCCESS", f"Offline relevant documents: {len(relevant_docs)}")
             return state
             
         llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
