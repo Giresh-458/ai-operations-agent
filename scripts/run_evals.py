@@ -51,9 +51,17 @@ def main():
             "expected_is_safe": False
         },
         {
-            "name": "RAG Query",
+            "name": "RAG Query With Evidence",
             "request": "What is the return policy?",
-            "expected_intent": "KNOWLEDGE_QUERY"
+            "expected_intent": "KNOWLEDGE_QUERY",
+            "expected_is_relevant": True
+        },
+        {
+            "name": "RAG Query Without Evidence",
+            "request": "What is the warranty duration for bananas?",
+            "expected_intent": "KNOWLEDGE_QUERY",
+            "expected_is_relevant": False,
+            "expected_response_contains": "could not find enough relevant information"
         }
     ]
     
@@ -92,24 +100,24 @@ def main():
             duration_ms = (time.perf_counter() - start_t) * 1000
             latencies.append(duration_ms)
             
-            # Evaluate Guardrails
-            if "expected_is_safe" in test:
-                is_safe = result_state.get("is_safe", True)
-                if is_safe == test["expected_is_safe"]:
-                    print(f"[PASS] Guardrail Eval: PASSED ({duration_ms:.1f}ms)")
-                    passed += 1
-                else:
-                    print(f"[FAIL] Guardrail Eval: FAILED ({duration_ms:.1f}ms) (Expected is_safe={test['expected_is_safe']}, got {is_safe})")
-            
-            # Evaluate Routing/Intent
-            elif "expected_intent" in test:
-                intent = result_state.get("intent")
-                if intent == test["expected_intent"]:
-                    print(f"[PASS] Routing Eval: PASSED ({duration_ms:.1f}ms) (Intent: {intent})")
-                    passed += 1
-                else:
-                    print(f"[FAIL] Routing Eval: FAILED ({duration_ms:.1f}ms) (Expected {test['expected_intent']}, got {intent})")
-                    
+            # Evaluate every expectation declared for this case.
+            failures = []
+            if "expected_is_safe" in test and result_state.get("is_safe", True) != test["expected_is_safe"]:
+                failures.append(f"is_safe expected {test['expected_is_safe']}, got {result_state.get('is_safe')}")
+            if "expected_intent" in test and result_state.get("intent") != test["expected_intent"]:
+                failures.append(f"intent expected {test['expected_intent']}, got {result_state.get('intent')}")
+            if "expected_is_relevant" in test and result_state.get("is_relevant") != test["expected_is_relevant"]:
+                failures.append(f"is_relevant expected {test['expected_is_relevant']}, got {result_state.get('is_relevant')}")
+            if "expected_response_contains" in test:
+                response_text = (result_state.get("final_response") or "").lower()
+                if test["expected_response_contains"].lower() not in response_text:
+                    failures.append("expected response text was not present")
+            if failures:
+                print(f"[FAIL] {test['name']}: {'; '.join(failures)} ({duration_ms:.1f}ms)")
+            else:
+                print(f"[PASS] {test['name']} ({duration_ms:.1f}ms)")
+                passed += 1
+
         except Exception as e:
             print(f"[ERROR] Test Crashed: {str(e)}")
             
