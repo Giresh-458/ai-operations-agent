@@ -394,11 +394,14 @@ def retrieve_docs(state: AgentState) -> AgentState:
             vector = embeddings.embed_query(query)
             articles = db.query(KnowledgeArticle).order_by(KnowledgeArticle.embedding.cosine_distance(vector)).limit(3).all()
         else:
-            # Fallback text search
-            articles = db.query(KnowledgeArticle).filter(KnowledgeArticle.content.ilike(f"%{query}%")).limit(3).all()
-            if not articles:
-                # Just return top 3
-                articles = db.query(KnowledgeArticle).limit(3).all()
+            # Deterministic lexical fallback: never return arbitrary documents.
+            terms = _query_terms(query)
+            if terms:
+                filters = [KnowledgeArticle.title.ilike(f"%{term}%") | KnowledgeArticle.content.ilike(f"%{term}%") for term in terms]
+                articles = db.query(KnowledgeArticle).filter(or_(*filters)).limit(10).all()
+                articles = sorted(articles, key=lambda article: _lexical_score(query, article.title or "", article.content or ""), reverse=True)
+            else:
+                articles = []
                 
         docs = [{"title": a.title, "content": a.content} for a in articles]
         state["documents"] = docs
