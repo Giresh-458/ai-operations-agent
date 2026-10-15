@@ -19,6 +19,5 @@ def update_customer_email(db: Session, customer_id: int, new_email: str) -> dict
     
     return {
         "customer_id": customer.id,
-        "new_email": customer.email,
         "status": "UPDATED"
     }

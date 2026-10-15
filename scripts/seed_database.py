@@ -9,12 +9,28 @@ from app.database import SessionLocal, engine, Base
 from app.models.database_models import Customer, Order, SupportTicket, Notification, KnowledgeArticle
 import json
 
+
+def sync_postgres_sequences():
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        for table_name in ("customers", "orders", "support_tickets", "notifications", "tasks", "audit_logs", "knowledge_articles"):
+            conn.execute(text(
+                f"SELECT setval(pg_get_serial_sequence('{table_name}', 'id'), "
+                f"COALESCE((SELECT MAX(id) FROM {table_name}), 1), "
+                f"EXISTS (SELECT 1 FROM {table_name}))"
+            ))
+
+
 def seed_data():
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
 
     Base.metadata.create_all(bind=engine)
+    # Repair databases seeded by earlier versions before the early return.
+    sync_postgres_sequences()
     db = SessionLocal()
     
     if db.query(Customer).count() > 0:
@@ -69,22 +85,37 @@ def seed_data():
         
         from app.config import settings
         from langchain_openai import OpenAIEmbeddings
-        
-        try:
-            if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "mock_key":
+
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "mock_key":
+            try:
                 embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
-                for article in articles:
-                    vector = embeddings.embed_query(article["content"])
-                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=vector))
-            else:
-                for article in articles:
-                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
+                embedded_articles = [
+                    KnowledgeArticle(
+                        title=article["title"],
+                        content=article["content"],
+                        embedding=embeddings.embed_query(article["content"]),
+                    )
+                    for article in articles
+                ]
+                db.add_all(embedded_articles)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                print(f"Skipping vector embedding generation ({type(exc).__name__}); using lexical retrieval.")
+                db.add_all([
+                    KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
+                    for article in articles
+                ])
+                db.commit()
+        else:
+            db.add_all([
+                KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
+                for article in articles
+            ])
             db.commit()
-        except Exception as e:
-            print(f"Skipping vector embedding generation (Mock mode or invalid key): {e}")
-            for article in articles:
-                db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
-            db.commit()
+
+    sync_postgres_sequences()
+
 
     print("Database seeded successfully.")
     db.close()
