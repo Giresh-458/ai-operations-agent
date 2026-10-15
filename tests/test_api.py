@@ -75,6 +75,14 @@ def test_update_email():
     assert data["status"] == "COMPLETED"
     assert data["intent"] == "UPDATE_EMAIL"
     assert "example@gmail.com" not in data["result"]["message"]
+    assert data["parameters"]["new_email"] == "[REDACTED_EMAIL]"
+    db = SessionLocal()
+    try:
+        stored_task = db.query(Task).filter(Task.id == data["task_id"]).first()
+        assert stored_task is not None
+        assert "example@gmail.com" not in (stored_task.parameters or "")
+    finally:
+        db.close()
     
 def test_send_notification():
     response = client.post("/tasks", json={"request": "Send notification to customer 101 say Hello"})
