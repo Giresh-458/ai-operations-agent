@@ -213,3 +213,14 @@ Try these commands directly in the Streamlit UI or via `curl`:
 
 ## License
 MIT License. This is a portfolio/demo project, not a production-ready system. Authentication currently uses a shared bearer token; it does not implement per-user authorization or a secrets-management service.
+
+
+## Operational safety notes
+
+- **Production startup does not seed demo customers or sample records.** Seed data is for local development/evaluation only; run \`python scripts/seed_database.py\` explicitly in an isolated development database. The app creates missing tables at startup for this demo, but \`Base.metadata.create_all\` is not a schema migration system; use reviewed migrations before evolving an existing production schema.
+- **Duplicate submission protection:** clients should send a stable \`Idempotency-Key\` header (8-128 characters from letters, digits, \`.\`, \`_\`, \`:\`, \`-\`) on \`POST /tasks\`. Reusing the same key and same request returns the original task; reusing it for a different request returns HTTP 409. Without a key, clients cannot expect request-level deduplication. Keep keys for the full period in which retries may occur.
+- **Checkpoint data minimization:** requests and extracted email values are redacted in task records and graph state. Raw request/email values are held only in process memory while the initial request is executing; this is intentionally single-process behavior. Do not run multiple workers or rely on resuming sensitive in-flight work after a process restart until runtime secrets move to a dedicated, access-controlled secret store.
+- **Authentication boundary:** \`API_ACCESS_TOKEN\` is one shared operator token, not per-user or tenant authorization. This version is suitable only for a trusted single-operator demo behind a private network/reverse proxy. Do not expose it as a multi-user production service; task ownership, tenant isolation, and role-based approval authorization require a real identity provider.
+- **Notifications are simulated:** records are marked \`SIMULATED\`; the app does not send email/SMS until a delivery provider is configured.
+- **Semantic retrieval backfill:** after configuring \`OPENAI_API_KEY\`, run \`python scripts/backfill_embeddings.py\` to embed existing knowledge articles that were seeded without vectors. This makes API calls and can incur cost. Run retrieval evaluations after backfill.
+- **Evaluation scope:** \`scripts/run_evals.py\` is an offline smoke suite, not a statistically meaningful quality benchmark or production certification. CI does not verify live provider credentials, real email/SMS delivery, multi-worker recovery, or deployment hardening.
