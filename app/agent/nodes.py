@@ -429,10 +429,18 @@ def retrieve_docs(state: AgentState) -> AgentState:
         embedding_key = settings.OPENAI_API_KEY
         if not is_valid_key(embedding_key) and state.get("provider", "OpenAI") == "OpenAI":
             embedding_key = get_runtime_api_key(state)
-        if engine.dialect.name == "postgresql" and is_valid_key(embedding_key):
+        existing_articles = db.query(KnowledgeArticle).all()
+        has_real_embeddings = any(
+            article.embedding is not None
+            and any(abs(float(value)) > 1e-12 for value in article.embedding)
+            for article in existing_articles
+        )
+        if engine.dialect.name == "postgresql" and is_valid_key(embedding_key) and has_real_embeddings:
             embeddings = OpenAIEmbeddings(api_key=embedding_key, max_retries=1)
             vector = embeddings.embed_query(query)
-            articles = db.query(KnowledgeArticle).order_by(KnowledgeArticle.embedding.cosine_distance(vector)).limit(3).all()
+            articles = db.query(KnowledgeArticle).filter(
+                KnowledgeArticle.embedding.is_not(None)
+            ).order_by(KnowledgeArticle.embedding.cosine_distance(vector)).limit(3).all()
         else:
             # Deterministic lexical fallback for SQLite/offline mode: never return arbitrary documents.
             terms = _query_terms(query)
