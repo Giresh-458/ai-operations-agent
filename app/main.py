@@ -68,12 +68,23 @@ async def require_api_token(request: Request, call_next):
 
     supplied = request.headers.get("Authorization", "")
     if token_map:
+        if any(not isinstance(token, str) or len(token) < 32 for token in token_map):
+            return JSONResponse(status_code=503, content={"detail": "Every API_ACCESS_TOKENS key must be at least 32 characters"})
         principal = None
         for token, identity in token_map.items():
-            if isinstance(token, str) and secrets.compare_digest(supplied, "Bearer " + token):
+            if secrets.compare_digest(supplied, "Bearer " + token):
                 principal = identity
                 break
         if principal is None:
+            # Keep the dedicated legacy token as a privileged operator/admin token
+            # for the built-in UI. Do not distribute it to ordinary users.
+            configured_token = settings.API_ACCESS_TOKEN
+            if configured_token and len(configured_token) >= 32 and not configured_token.lower().startswith("replace_") and secrets.compare_digest(supplied, "Bearer " + configured_token):
+                request.state.actor_id = "operator"
+                request.state.actor_role = "admin"
+                request.state.enforce_task_ownership = False
+                request.state.is_admin = True
+                return await call_next(request)
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
         if isinstance(principal, str):
             actor_id, role = principal, "operator"
