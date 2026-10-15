@@ -4,7 +4,6 @@ class AgentState(TypedDict):
     task_id: int
     user_request: str
     provider: Optional[str]
-    api_key: Optional[str]
     intent: Optional[str]
     parameters: Optional[Dict[str, Any]]
     validation_result: Optional[bool]
