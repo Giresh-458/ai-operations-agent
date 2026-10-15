@@ -72,3 +72,11 @@ class IdempotencyRecord(Base):
     request_hash = Column(String(64), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class TaskOwner(Base):
+    """Associates a task with the identity that created it when scoped tokens are enabled."""
+    __tablename__ = "task_owners"
+    task_id = Column(Integer, ForeignKey("tasks.id"), primary_key=True)
+    owner_id = Column(String(128), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
