@@ -7,10 +7,11 @@ import os
 
 from sqlalchemy import text
 
-# Create vector extension if not exists
-with engine.connect() as conn:
-    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    conn.commit()
+# pgvector is available in PostgreSQL deployments, but SQLite is used by tests.
+if engine.dialect.name == "postgresql":
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
 
 # Create tables
 Base.metadata.create_all(bind=engine)
