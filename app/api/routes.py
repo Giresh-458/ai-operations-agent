@@ -286,6 +286,6 @@ def get_database_state(db: Session = Depends(get_db)):
         'customers': [{'id': c.id, 'name': c.name} for c in customers],
         'orders': [{'id': o.id, 'customer_id': o.customer_id, 'status': o.status} for o in orders],
         'tickets': [{'id': t.id, 'customer_id': t.customer_id, 'issue': t.issue, 'priority': t.priority, 'status': t.status} for t in tickets],
-        'notifications': [{'id': n.id, 'customer_id': n.customer_id, 'message': n.message, 'status': n.status} for n in notifications]
+        'notifications': [{'id': n.id, 'customer_id': n.customer_id, 'status': n.status} for n in notifications]
     }
 
