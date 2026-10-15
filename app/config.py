@@ -13,6 +13,8 @@ class Settings(BaseSettings):
         "postgresql://postgres:postgres@localhost:5432/operations_agent"
     )
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))
+    # Deterministic mock execution is for local tests only; keep it off by default.
+    ALLOW_OFFLINE_MODE: bool = os.getenv("ALLOW_OFFLINE_MODE", "false").lower() in {"1", "true", "yes"}
     API_ACCESS_TOKEN: str = os.getenv("API_ACCESS_TOKEN", "")
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:8501,http://127.0.0.1:8501")
 
