@@ -56,8 +56,7 @@ def validate_provider(req: ProviderValidationRequest):
         else:
             raise HTTPException(status_code=400, detail="Unsupported provider")
     except Exception as e:
-        print(f"Provider validation failed: {str(e)}")
-        raise HTTPException(status_code=401, detail=f"Connection failed: {str(e)}")
+        raise HTTPException(status_code=401, detail="Provider connection failed; verify the provider and key.")
 
 @router.post("/tasks", response_model=TaskResponse)
 def create_task(req: TaskRequest, db: Session = Depends(get_db)):
@@ -245,7 +244,7 @@ def get_database_state(db: Session = Depends(get_db)):
     tickets = db.query(SupportTicket).all()
     notifications = db.query(Notification).all()
     return {
-        'customers': [{'id': c.id, 'name': c.name, 'email': c.email} for c in customers],
+        'customers': [{'id': c.id, 'name': c.name} for c in customers],
         'orders': [{'id': o.id, 'customer_id': o.customer_id, 'status': o.status} for o in orders],
         'tickets': [{'id': t.id, 'customer_id': t.customer_id, 'issue': t.issue, 'priority': t.priority, 'status': t.status} for t in tickets],
         'notifications': [{'id': n.id, 'customer_id': n.customer_id, 'message': n.message, 'status': n.status} for n in notifications]
