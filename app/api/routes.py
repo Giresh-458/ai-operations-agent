@@ -7,7 +7,7 @@ from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, Aud
 from app.models.database_models import Task, AuditLog
 from app.agent.graph import agent_app
 from app.agent.state import AgentState
-from app.agent.nodes import log_audit
+from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key
 
 router = APIRouter()
 
@@ -76,7 +76,6 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
         "task_id": task.id,
         "user_request": req_text,
         "provider": req.provider,
-        "api_key": req.api_key,
         "intent": None,
         "parameters": None,
         "validation_result": None,
@@ -90,9 +89,13 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     }
     
     # Run the graph synchronously
-    result_state = agent_app.invoke(
-        state, config={"configurable": {"thread_id": str(task.id)}}
-    )
+    set_runtime_api_key(task.id, req.api_key)
+    try:
+        result_state = agent_app.invoke(
+            state, config={"configurable": {"thread_id": str(task.id)}}
+        )
+    finally:
+        clear_runtime_api_key(task.id)
     
     # Refresh task from DB
     db.commit()
