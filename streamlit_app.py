@@ -3,6 +3,9 @@ import time
 import requests
 import streamlit as st
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure Page
 st.set_page_config(
@@ -14,10 +17,16 @@ st.set_page_config(
 # Backend URL configuration (Streamlit Cloud secrets, environment variables, or local default)
 try:
     cloud_secret_url = st.secrets.get("BACKEND_URL")
+    cloud_secret_token = st.secrets.get("BACKEND_API_TOKEN")
 except Exception:
     cloud_secret_url = None
+    cloud_secret_token = None
 
 BACKEND_URL = (os.getenv("BACKEND_URL") or cloud_secret_url or "http://localhost:8080").rstrip("/")
+BACKEND_API_TOKEN = os.getenv("BACKEND_API_TOKEN") or os.getenv("API_ACCESS_TOKEN") or cloud_secret_token or ""
+API_CLIENT = requests.Session()
+if BACKEND_API_TOKEN:
+    API_CLIENT.headers.update({"Authorization": f"Bearer {BACKEND_API_TOKEN}"})
 
 # Initialize Session State
 if "connected" not in st.session_state:
@@ -69,7 +78,7 @@ with st.sidebar:
             else:
                 with st.spinner(f"Validating {provider_choice} connection..."):
                     try:
-                        resp = requests.post(
+                        resp = API_CLIENT.post(
                             f"{BACKEND_URL}/validate_provider",
                             json={"provider": provider_choice, "api_key": api_key_input.strip()},
                             timeout=15
@@ -157,7 +166,7 @@ with tab_agent:
                         "provider": st.session_state.provider,
                         "api_key": st.session_state.api_key
                     }
-                    resp = requests.post(f"{BACKEND_URL}/tasks", json=payload, timeout=45)
+                    resp = API_CLIENT.post(f"{BACKEND_URL}/tasks", json=payload, timeout=45)
                     if resp.status_code == 200:
                         st.session_state.current_task = resp.json()
                         st.toast("Task executed successfully.")
@@ -218,7 +227,7 @@ with tab_agent:
             with col_app:
                 if st.button("Approve Critical Action", type="primary", use_container_width=True):
                     with st.spinner("Processing approval..."):
-                        app_resp = requests.post(
+                        app_resp = API_CLIENT.post(
                             f"{BACKEND_URL}/tasks/{task_id}/approve",
                             json={"provider": st.session_state.provider, "api_key": st.session_state.api_key}
                         )
@@ -231,7 +240,7 @@ with tab_agent:
             with col_rej:
                 if st.button("Reject Action", use_container_width=True):
                     with st.spinner("Processing rejection..."):
-                        rej_resp = requests.post(f"{BACKEND_URL}/tasks/{task_id}/reject")
+                        rej_resp = API_CLIENT.post(f"{BACKEND_URL}/tasks/{task_id}/reject")
                         if rej_resp.status_code == 200:
                             st.session_state.current_task = rej_resp.json()
                             st.info("Action Rejected.")
@@ -272,7 +281,7 @@ with tab_agent:
         
         # Fetch live stats from database
         try:
-            db_resp = requests.get(f"{BACKEND_URL}/database", timeout=5)
+            db_resp = API_CLIENT.get(f"{BACKEND_URL}/database", timeout=5)
             if db_resp.status_code == 200:
                 db_data = db_resp.json()
                 orders_cnt = len(db_data.get("orders", []))
@@ -302,9 +311,9 @@ with tab_agent:
     st.subheader("Audit Trail")
     if task_id:
         try:
-            audit_resp = requests.get(f"{BACKEND_URL}/tasks/{task_id}/logs", timeout=10)
+            audit_resp = API_CLIENT.get(f"{BACKEND_URL}/tasks/{task_id}/logs", timeout=10)
             if audit_resp.status_code != 200:
-                audit_resp = requests.get(f"{BACKEND_URL}/tasks/{task_id}/audit", timeout=10)
+                audit_resp = API_CLIENT.get(f"{BACKEND_URL}/tasks/{task_id}/audit", timeout=10)
             if audit_resp.status_code == 200:
                 logs = audit_resp.json()
                 if logs:
@@ -339,7 +348,7 @@ with tab_data:
         refresh_db = st.button("↻ Refresh Database", use_container_width=True)
 
     try:
-        db_resp = requests.get(f"{BACKEND_URL}/database", timeout=10)
+        db_resp = API_CLIENT.get(f"{BACKEND_URL}/database", timeout=10)
         if db_resp.status_code == 200:
             db_state = db_resp.json()
             
@@ -410,7 +419,7 @@ with tab_history:
         refresh_hist = st.button("↻ Refresh History", use_container_width=True)
 
     try:
-        tasks_resp = requests.get(f"{BACKEND_URL}/tasks", timeout=10)
+        tasks_resp = API_CLIENT.get(f"{BACKEND_URL}/tasks", timeout=10)
         if tasks_resp.status_code == 200:
             tasks_list = tasks_resp.json()
             if tasks_list:
