@@ -4,7 +4,7 @@ This repository is a portfolio/demo application. The controls below reduce commo
 
 ## 1. Security and operational boundaries
 
-- **API authentication:** Operational API routes require a bearer token of at least 32 characters. `API_ACCESS_TOKENS` optionally maps individual tokens to user IDs or `{\"user_id\":\"alice\",\"role\":\"operator\"}` identities. Scoped tokens can only list/read/approve their own tasks; `role=admin` is required for the shared database explorer. `API_ACCESS_TOKEN` is a privileged compatibility/admin token for the built-in UI and must not be distributed to ordinary users. This is manual token management, not OIDC/SSO.
+- **API authentication:** Operational API routes require a bearer token of at least 32 characters. `API_ACCESS_TOKENS` optionally maps individual tokens to user IDs or `{"user_id":"alice","role":"operator"}` identities. Scoped tokens can only list/read/approve their own tasks; `role=admin` is required for the shared database explorer. `API_ACCESS_TOKEN` is a privileged compatibility/admin token for the built-in UI and must not be distributed to ordinary users. This is manual token management, not OIDC/SSO.
 - **Secrets:** Never commit `.env`, provider keys, database passwords, or production tokens. User-entered LLM keys are held in process-local memory while a task runs; this is not suitable for multi-worker deployments or a managed secrets service.
 - **Database exposure:** The production Compose file does not publish PostgreSQL's port and keeps services on an internal Docker network.
 - **Transport security:** The Compose ports bind to loopback. Put a reverse proxy with HTTPS in front of the UI/API before remote use.
