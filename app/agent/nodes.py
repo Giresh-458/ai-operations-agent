@@ -60,6 +60,20 @@ def log_audit(db, task_id, action, status, details=None):
     db.add(log)
     db.commit()
 
+def _redact_persisted_parameters(parameters):
+    if not parameters:
+        return parameters
+    import re
+    safe = dict(parameters)
+    for key, value in safe.items():
+        if isinstance(value, str):
+            value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
+            value = re.sub(r"\b\d{4}(?:[- ]\d{4}){3}\b", "[REDACTED_CARD_NUMBER]", value)
+            value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
+            safe[key] = value
+    return safe
+
+
 def update_task_status(db, task_id, status, intent=None, parameters=None, result=None, requires_human=None):
     task = db.query(Task).filter(Task.id == task_id).first()
     if task:
@@ -67,7 +81,8 @@ def update_task_status(db, task_id, status, intent=None, parameters=None, result
         if intent:
             task.intent = intent
         if parameters:
-            task.parameters = json.dumps(parameters)
+            # Persist a redacted copy; the live graph state retains values needed by tools.
+            task.parameters = json.dumps(_redact_persisted_parameters(parameters))
         if result:
             task.result = json.dumps(result)
         if requires_human is not None:
