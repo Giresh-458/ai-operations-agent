@@ -10,6 +10,7 @@ from app.database import Base, engine, SessionLocal
 from scripts.seed_database import seed_data
 from app.models.database_models import Task
 from app.agent.nodes import validate_request
+from app.config import settings
 
 # We will use the SQLite in-memory for testing, but let's just stick to the configured test db or SQLite.
 # Actually, since sqlalchemy is setup, we can just use the provided DB in settings but it's risky to clear it.
@@ -221,3 +222,9 @@ def test_guardrail_evaluation_error_fails_closed(monkeypatch):
     result = nodes.guardrail_check(state)
     assert result["is_safe"] is False
     assert result["status"] == "FAILED"
+
+def test_weak_configured_api_token_fails_closed(monkeypatch):
+    monkeypatch.setattr(settings, "API_ACCESS_TOKEN", "short")
+    weak_client = TestClient(app, headers={"Authorization": "Bearer short"})
+    response = weak_client.get("/database")
+    assert response.status_code == 503
