@@ -33,6 +33,7 @@ services:
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-AIOpsAgent}
       MAX_RETRIES: ${MAX_RETRIES:-2}
+      ALLOW_OFFLINE_MODE: ${ALLOW_OFFLINE_MODE:-false}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:?API_ACCESS_TOKEN must be set to a random token of at least 32 characters}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://your-ui-domain.example}
     depends_on:
