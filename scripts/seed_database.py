@@ -87,6 +87,17 @@ def seed_data():
                 db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
             db.commit()
 
+    # Explicit seed IDs do not advance PostgreSQL serial sequences. Reset the
+    # sequences so runtime-created tickets and notifications cannot collide.
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as conn:
+            for table_name in ("customers", "orders", "support_tickets", "notifications", "tasks", "audit_logs", "knowledge_articles"):
+                conn.execute(text(
+                    f"SELECT setval(pg_get_serial_sequence('{table_name}', 'id'), "
+                    f"COALESCE((SELECT MAX(id) FROM {table_name}), 1), "
+                    f"EXISTS (SELECT 1 FROM {table_name}))"
+                ))
+
     print("Database seeded successfully.")
     db.close()
 
