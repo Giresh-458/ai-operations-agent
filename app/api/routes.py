@@ -1,19 +1,31 @@
 import json
 import re
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import hashlib
 from app.database import get_db
 from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, AuditLogResponse, ProviderValidationRequest, ApprovalRequest
-from app.models.database_models import Task, AuditLog, IdempotencyRecord
+from app.models.database_models import Task, AuditLog, IdempotencyRecord, TaskOwner
 from app.agent.graph import agent_app
 from app.agent.state import AgentState
 from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key, is_valid_key, set_runtime_request, clear_runtime_request
 from app.config import settings
 
 router = APIRouter()
+
+
+def _assert_task_access(db: Session, task_id: int, request: Request) -> None:
+    if not getattr(request.state, "enforce_task_ownership", False):
+        return
+    owner = db.query(TaskOwner).filter(
+        TaskOwner.task_id == task_id,
+        TaskOwner.owner_id == request.state.actor_id,
+    ).first()
+    if owner is None:
+        # Return 404 rather than disclose whether another user's task exists.
+        raise HTTPException(status_code=404, detail="Task not found")
 
 
 def _task_response(task: Task) -> TaskResponse:
@@ -91,7 +103,7 @@ def validate_provider(req: ProviderValidationRequest):
         raise HTTPException(status_code=401, detail="Provider connection failed; verify the provider and key.")
 
 @router.post("/tasks", response_model=TaskResponse)
-def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+def create_task(req: TaskRequest, request: Request, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
     req_text = req.get_request_text().strip()
     if not req_text:
         raise HTTPException(status_code=422, detail="Request text must not be empty.")
@@ -112,7 +124,7 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key
         )
 
     request_hash = hashlib.sha256(
-        json.dumps({"request": req_text, "provider": req.provider}, sort_keys=True).encode("utf-8")
+        json.dumps({"request": req_text, "provider": req.provider, "actor_id": getattr(request.state, "actor_id", "operator")}, sort_keys=True).encode("utf-8")
     ).hexdigest()
     if idempotency_key is not None:
         idempotency_key = idempotency_key.strip()
@@ -125,12 +137,15 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key
             existing_task = db.query(Task).filter(Task.id == existing.task_id).first()
             if existing_task is None:
                 raise HTTPException(status_code=409, detail="Idempotency record is incomplete; inspect task recovery logs.")
+            _assert_task_access(db, existing_task.id, request)
             return _task_response(existing_task)
 
     task = Task(user_request=_redact_sensitive_text(req_text), status="PENDING")
     db.add(task)
     try:
         db.flush()
+        if getattr(request.state, "enforce_task_ownership", False):
+            db.add(TaskOwner(task_id=task.id, owner_id=request.state.actor_id))
         if idempotency_key is not None:
             db.add(IdempotencyRecord(key=idempotency_key, request_hash=request_hash, task_id=task.id))
         db.commit()
@@ -141,6 +156,7 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key
             if existing and existing.request_hash == request_hash:
                 existing_task = db.query(Task).filter(Task.id == existing.task_id).first()
                 if existing_task is not None:
+                    _assert_task_access(db, existing_task.id, request)
                     return _task_response(existing_task)
             if existing:
                 raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different request.")
@@ -229,15 +245,19 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key
     )
 
 @router.get("/tasks", response_model=list[TaskListResponse])
-def get_tasks(db: Session = Depends(get_db)):
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
+def get_tasks(request: Request, db: Session = Depends(get_db)):
+    query = db.query(Task)
+    if getattr(request.state, "enforce_task_ownership", False):
+        query = query.join(TaskOwner, TaskOwner.task_id == Task.id).filter(TaskOwner.owner_id == request.state.actor_id)
+    tasks = query.order_by(Task.id.desc()).all()
     return [TaskListResponse(id=t.id, request=t.user_request, intent=t.intent, status=t.status) for t in tasks]
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
-def get_task(task_id: int, db: Session = Depends(get_db)):
+def get_task(task_id: int, request: Request, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _assert_task_access(db, task_id, request)
         
     res = None
     if task.result:
@@ -256,7 +276,8 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.get("/tasks/{task_id}/logs")
 @router.get("/tasks/{task_id}/audit")
-def get_task_logs(task_id: int, db: Session = Depends(get_db)):
+def get_task_logs(task_id: int, request: Request, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     logs = db.query(AuditLog).filter(AuditLog.task_id == task_id).order_by(AuditLog.id.asc()).all()
     return [
         {
@@ -269,7 +290,8 @@ def get_task_logs(task_id: int, db: Session = Depends(get_db)):
     ]
 
 @router.post("/tasks/{task_id}/approve")
-def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+def approve_task(task_id: int, request: Request, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     if req and req.api_key and not is_valid_key(req.api_key.strip()):
         raise HTTPException(status_code=422, detail="A valid provider API key is required.")
 
@@ -321,7 +343,8 @@ def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session =
 
 
 @router.post("/tasks/{task_id}/reject")
-def reject_task(task_id: int, db: Session = Depends(get_db)):
+def reject_task(task_id: int, request: Request, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     # Same atomic claim as approval; each task can receive only one decision.
     claimed = (
         db.query(Task)
@@ -362,7 +385,9 @@ def reject_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.get('/database')
-def get_database_state(db: Session = Depends(get_db)):
+def get_database_state(request: Request, db: Session = Depends(get_db)):
+    if getattr(request.state, "enforce_task_ownership", False) and not getattr(request.state, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Database explorer requires an admin API identity.")
     from app.models.database_models import Customer, Order, SupportTicket, Notification
     customers = db.query(Customer).all()
     orders = db.query(Order).all()
