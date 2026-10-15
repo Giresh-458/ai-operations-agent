@@ -10,9 +10,10 @@ from app.models.database_models import Customer, Order, SupportTicket, Notificat
 import json
 
 def seed_data():
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
 
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
