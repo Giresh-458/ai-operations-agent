@@ -1,7 +1,7 @@
 import os
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["OPENAI_API_KEY"] = "mock_key"
-os.environ["API_ACCESS_TOKEN"] = "test-token"
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+os.environ.setdefault("OPENAI_API_KEY", "mock_key")
+os.environ.setdefault("API_ACCESS_TOKEN", "test-token")
 
 import pytest
 from fastapi.testclient import TestClient
