@@ -85,14 +85,16 @@ def seed_data():
         db.add_all(missing_notifications)
         db.commit()
     
-    # Seed Knowledge Base
-    if db.query(KnowledgeArticle).count() == 0:
-        articles = [
-            {"title": "Return Policy", "content": "Customers can return items within 30 days of receipt. Items must be in original condition."},
-            {"title": "Support SLA", "content": "Critical issues are responded to within 1 hour. High priority within 4 hours. Normal priority within 24 hours."},
-            {"title": "Lost Package", "content": "If a package is lost, wait 5 days after the expected delivery date before creating a replacement ticket."}
-        ]
-        
+    # Seed missing knowledge articles without duplicating existing titles.
+    articles = [
+        {"title": "Return Policy", "content": "Customers can return items within 30 days of receipt. Items must be in original condition."},
+        {"title": "Support SLA", "content": "Critical issues are responded to within 1 hour. High priority within 4 hours. Normal priority within 24 hours."},
+        {"title": "Lost Package", "content": "If a package is lost, wait 5 days after the expected delivery date before creating a replacement ticket."}
+    ]
+    existing_article_titles = {row[0] for row in db.query(KnowledgeArticle.title).all()}
+    missing_articles = [article for article in articles if article["title"] not in existing_article_titles]
+
+    if missing_articles:
         from app.config import settings
         from langchain_openai import OpenAIEmbeddings
 
@@ -105,7 +107,7 @@ def seed_data():
                         content=article["content"],
                         embedding=embeddings.embed_query(article["content"]),
                     )
-                    for article in articles
+                    for article in missing_articles
                 ]
                 db.add_all(embedded_articles)
                 db.commit()
@@ -114,13 +116,13 @@ def seed_data():
                 print(f"Skipping vector embedding generation ({type(exc).__name__}); using lexical retrieval.")
                 db.add_all([
                     KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
-                    for article in articles
+                    for article in missing_articles
                 ])
                 db.commit()
         else:
             db.add_all([
                 KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
-                for article in articles
+                for article in missing_articles
             ])
             db.commit()
 
