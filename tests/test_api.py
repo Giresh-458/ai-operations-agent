@@ -38,6 +38,7 @@ def test_check_order():
 
 def test_create_ticket_human_approval():
     # "critical" triggers human approval mock logic
+    before_tickets = len(client.get("/database").json()["tickets"])
     response = client.post("/tasks", json={"request": "Create a critical support ticket for customer 101"})
     assert response.status_code == 200
     data = response.json()
@@ -47,7 +48,7 @@ def test_create_ticket_human_approval():
     task_id = data["task_id"]
     
     # No side effect is allowed before approval.
-    before_tickets = len(client.get("/database").json()["tickets"])
+    assert len(client.get("/database").json()["tickets"]) == before_tickets
 
     # Approve it
     approve_res = client.post(f"/tasks/{task_id}/approve")
