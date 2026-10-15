@@ -29,6 +29,10 @@ class ProviderValidationRequest(BaseModel):
     provider: str
     api_key: str = Field(min_length=1, max_length=512)
 
+class ApprovalRequest(BaseModel):
+    api_key: Optional[str] = Field(default=None, max_length=512)
+
+
 class AuditLogResponse(BaseModel):
     action: str
     status: str
