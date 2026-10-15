@@ -1,4 +1,5 @@
 import json
+import re
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from langgraph.types import Command
 from sqlalchemy.orm import Session
@@ -10,6 +11,13 @@ from app.agent.state import AgentState
 from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key
 
 router = APIRouter()
+
+
+def _redact_sensitive_text(value: str) -> str:
+    value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
+    value = re.sub(r"\b(?:\d[ -]?){13,19}\b", "[REDACTED_CARD_NUMBER]", value)
+    value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
+    return value
 
 def run_agent(task_id: int, request_text: str):
     state: AgentState = {
@@ -69,13 +77,36 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Request text must be at most 4000 characters.")
     if req.provider not in {"OpenAI", "Groq"}:
         raise HTTPException(status_code=422, detail="Provider must be OpenAI or Groq.")
-    task = Task(user_request=req_text, status="PENDING")
+    task = Task(user_request=_redact_sensitive_text(req_text), status="PENDING")
     db.add(task)
     db.commit()
     db.refresh(task)
     
     log_audit(db, task.id, "TASK_CREATED", "SUCCESS")
-    
+
+    # Block high-confidence PII before it enters a checkpoint or model prompt.
+    contains_sensitive_pii = bool(
+        re.search(r"\b(?:\d[ -]?){13,19}\b", req_text)
+        or re.search(r"\b\d{3}-\d{2}-\d{4}\b", req_text)
+    )
+    if contains_sensitive_pii:
+        result = {
+            "message": "Security Guardrail Triggered: Request contains sensitive PII (Credit Card or SSN)."
+        }
+        task.status = "FAILED"
+        task.result = json.dumps(result)
+        db.commit()
+        log_audit(db, task.id, "GUARDRAIL_CHECK", "FAILED", "Sensitive PII detected before checkpointing")
+        return TaskResponse(
+            task_id=task.id,
+            status=task.status,
+            intent=None,
+            selected_tool=None,
+            parameters={},
+            result=result,
+            requires_human=None,
+        )
+
     # In a full setup we might run this in the background, but for this project
     # returning the final state directly makes it easier to use without polling.
     # However, since they want "WAITING_FOR_APPROVAL", a synchronous block would be okay.
