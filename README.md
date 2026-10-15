@@ -155,8 +155,9 @@ docker-compose up -d --build
 | Service | URL | Description |
 |---|---|---|
 | **Streamlit Python UI** | **[http://localhost:8501](http://localhost:8501)** | Interactive web console |
+| **FastAPI static dashboard** | **[http://localhost:8080/app/index.html](http://localhost:8080/app/index.html)** | Enter the configured API access token and provider key; the token is kept only in page memory |
 | **FastAPI Backend & Swagger** | **[http://localhost:8080/docs](http://localhost:8080/docs)** | Interactive OpenAPI documentation |
-| **PostgreSQL Database** | `localhost:5432` | Relational DB + `pgvector` store |
+| **PostgreSQL Database** | `localhost:5432` | Relational DB + `pgvector` store (development Compose only) |
 
 ---
 
@@ -192,6 +193,7 @@ Send `Authorization: Bearer <API_ACCESS_TOKEN>` with operational API requests. `
 | `POST` | `/tasks/{id}/reject` | Explicitly rejects a task paused in `WAITING_FOR_APPROVAL`. |
 | `GET` | `/database` | Returns a redacted operational data view for the UI. |
 | `GET` | `/health` | Public service liveness probe. |
+| `GET` | `/ready` | Public readiness probe; checks database connectivity. |
 
 ---
 
