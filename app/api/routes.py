@@ -15,7 +15,12 @@ router = APIRouter()
 
 def _redact_sensitive_text(value: str) -> str:
     value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
-    value = re.sub(r"\b(?:\d[ -]?){13,19}\b", "[REDACTED_CARD_NUMBER]", value)
+    value = re.sub(r"\b\d{4}(?:[- ]\d{4}){3}\b", "[REDACTED_CARD_NUMBER]", value)
+    value = re.sub(
+        r"(?i)(credit\s*card|card number|card|cc)(\D{0,30})(?:\d[ -]?){13,19}\b",
+        lambda match: match.group(1) + match.group(2) + "[REDACTED_CARD_NUMBER]",
+        value,
+    )
     value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
     return value
 
@@ -86,8 +91,9 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
 
     # Block high-confidence PII before it enters a checkpoint or model prompt.
     contains_sensitive_pii = bool(
-        re.search(r"\b(?:\d[ -]?){13,19}\b", req_text)
+        re.search(r"\b\d{4}(?:[- ]\d{4}){3}\b", req_text)
         or re.search(r"\b\d{3}-\d{2}-\d{4}\b", req_text)
+        or re.search(r"(?i)(credit\s*card|card number|card|cc)(\D{0,30})(?:\d[ -]?){13,19}\b", req_text)
     )
     if contains_sensitive_pii:
         result = {
