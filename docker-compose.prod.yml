@@ -45,7 +45,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    command: sh -c "PYTHONPATH=/app python scripts/seed_database.py && PYTHONPATH=/app python -m app.main"
+    command: ["python", "-m", "app.main"]
     networks:
       - internal_network
 
