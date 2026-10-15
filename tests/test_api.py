@@ -2,6 +2,7 @@ import os
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("OPENAI_API_KEY", "mock_key")
 os.environ.setdefault("API_ACCESS_TOKEN", "test-token-for-ci-only-0123456789abcdef")
+os.environ.setdefault("ALLOW_OFFLINE_MODE", "true")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -215,6 +216,15 @@ def test_oversized_task_request_is_rejected():
 def test_unsupported_provider_is_rejected():
     response = client.post("/tasks", json={"request": "Check order 5001", "provider": "Unknown"})
     assert response.status_code == 422
+
+
+def test_missing_provider_key_fails_when_offline_mode_is_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_OFFLINE_MODE", False)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "mock_key")
+
+    response = client.post("/tasks", json={"request": "Check the status of order 5001"})
+    assert response.status_code == 503
+    assert "offline mode is disabled" in response.json()["detail"]
 
 
 def test_invalid_email_parameter_fails_validation():
