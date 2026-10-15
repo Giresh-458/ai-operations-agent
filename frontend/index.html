@@ -38,6 +38,11 @@
             <div class="card-title">LLM Provider Configuration</div>
             <div id="providerSetupForm">
                 <div class="input-group" style="margin-bottom: 16px;">
+                    <label for="apiAccessTokenInput" style="display:block; margin-bottom: 8px;">API Access Token</label>
+                    <input type="password" id="apiAccessTokenInput" autocomplete="off" placeholder="Enter the configured API access token" style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; width: 100%; max-width: 300px;">
+                    <small style="display:block; color:#666; margin-top:6px;">Used only in this page session; do not share or save this token in a public browser.</small>
+                </div>
+                <div class="input-group" style="margin-bottom: 16px;">
                     <label for="providerSelect" style="display:block; margin-bottom: 8px;">LLM Provider</label>
                     <select id="providerSelect" style="padding: 10px; border-radius: 6px; border: 1px solid #ccc; width: 100%; max-width: 300px;">
                         <option value="">Select Provider</option>
