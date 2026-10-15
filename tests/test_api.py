@@ -72,6 +72,7 @@ def test_update_email():
     data = response.json()
     assert data["status"] == "COMPLETED"
     assert data["intent"] == "UPDATE_EMAIL"
+    assert "example@gmail.com" not in data["result"]["message"]
     
 def test_send_notification():
     response = client.post("/tasks", json={"request": "Send notification to customer 101 say Hello"})
@@ -118,6 +119,8 @@ def test_database_state():
     assert "notifications" in data
     if data["customers"]:
         assert "email" not in data["customers"][0]
+    if data["notifications"]:
+        assert "message" not in data["notifications"][0]
 
 
 
@@ -185,3 +188,36 @@ def test_invalid_email_parameter_fails_validation():
     result = validate_request(state)
     assert result["validation_result"] is False
     assert "valid email address" in result["validation_message"]
+
+def test_guardrail_evaluation_error_fails_closed(monkeypatch):
+    import app.agent.nodes as nodes
+
+    db = SessionLocal()
+    try:
+        task = Task(user_request="safe request", status="PENDING")
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        task_id = task.id
+    finally:
+        db.close()
+
+    original_log_audit = nodes.log_audit
+    calls = {"count": 0}
+
+    def fail_first_audit(db, task_id, action, status, details=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("simulated audit failure")
+        return original_log_audit(db, task_id, action, status, details)
+
+    monkeypatch.setattr(nodes, "log_audit", fail_first_audit)
+    state = {
+        "task_id": task_id,
+        "user_request": "Check order 5001",
+        "status": "PENDING",
+        "retry_count": 0,
+    }
+    result = nodes.guardrail_check(state)
+    assert result["is_safe"] is False
+    assert result["status"] == "FAILED"
