@@ -25,7 +25,10 @@ unauthenticated_client = TestClient(app)
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_db():
-    # Setup test database
+    # Reset only the local SQLite test database so repeated test runs are isolated.
+    # PostgreSQL CI uses a fresh disposable service database for each workflow run.
+    if engine.dialect.name == "sqlite":
+        Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     seed_data()
     yield
