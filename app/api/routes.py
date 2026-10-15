@@ -151,7 +151,7 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db), idempotency_key
     # Block high-confidence PII before it enters a checkpoint or model prompt.
     contains_sensitive_pii = bool(
         re.search(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", req_text)
-        or re.search(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)
+        or re.search(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)", req_text)
         or re.search(r"(?i)(credit\s*card|card number|card|cc)(\D{0,30})(?:\d[ -]?){13,19}\b", req_text)
     )
     if contains_sensitive_pii:
