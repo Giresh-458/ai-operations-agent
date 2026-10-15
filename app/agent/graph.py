@@ -1,8 +1,10 @@
 from langgraph.graph import StateGraph, END
+from app.config import settings
 from app.agent.state import AgentState
 from app.agent.nodes import (
     understand_request,
     validate_request,
+    request_human_approval,
     select_tool,
     execute_tool,
     check_result,
@@ -15,11 +17,27 @@ from app.agent.nodes import (
     guardrail_check
 )
 
-def build_graph():
+def _create_checkpointer():
+    """Use PostgreSQL-backed checkpoints in deployments and memory in tests."""
+    if settings.DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")):
+        import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
+        connection_url = settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
+        connection = psycopg.connect(connection_url, autocommit=True)
+        checkpointer = PostgresSaver(connection)
+        checkpointer.setup()
+        return checkpointer
+    from langgraph.checkpoint.memory import MemorySaver
+    return MemorySaver()
+
+_checkpointer = _create_checkpointer()
+
+def build_graph(checkpointer=None):
     workflow = StateGraph(AgentState)
     
     workflow.add_node("understand_request", understand_request)
     workflow.add_node("validate_request", validate_request)
+    workflow.add_node("request_human_approval", request_human_approval)
     workflow.add_node("select_tool", select_tool)
     workflow.add_node("execute_tool", execute_tool)
     workflow.add_node("check_result", check_result)
@@ -82,19 +100,38 @@ def build_graph():
     def validation_router(state: AgentState):
         if state.get("status") == "FAILED" or not state.get("validation_result"):
             return "final_response"
+        if state.get("requires_human") == "WAITING":
+            return "request_human_approval"
         return "select_tool"
-        
+
     workflow.add_conditional_edges(
         "validate_request",
         validation_router,
-        {"final_response": "final_response", "select_tool": "select_tool"}
+        {
+            "final_response": "final_response",
+            "request_human_approval": "request_human_approval",
+            "select_tool": "select_tool",
+        },
     )
-    
+
+    def approval_router(state: AgentState):
+        if state.get("status") == "REJECTED":
+            return "final_response"
+        return "select_tool"
+
+    workflow.add_conditional_edges(
+        "request_human_approval",
+        approval_router,
+        {"final_response": "final_response", "select_tool": "select_tool"},
+    )
+
     workflow.add_edge("select_tool", "execute_tool")
     workflow.add_edge("execute_tool", "check_result")
     
     def retry_router(state: AgentState):
-        if state.get("status") == "ERROR":
+        # Only retry the read-only order lookup automatically. Retrying mutations
+        # after an ambiguous failure can create duplicate tickets or notifications.
+        if state.get("status") == "ERROR" and state.get("intent") == "CHECK_ORDER":
             return "retry"
         return "final_response"
         
@@ -117,6 +154,6 @@ def build_graph():
     
     workflow.add_edge("final_response", END)
     
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer or _checkpointer)
 
 agent_app = build_graph()
