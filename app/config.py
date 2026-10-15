@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Deterministic mock execution is for local tests only; keep it off by default.
     ALLOW_OFFLINE_MODE: bool = os.getenv("ALLOW_OFFLINE_MODE", "false").lower() in {"1", "true", "yes"}
     API_ACCESS_TOKEN: str = os.getenv("API_ACCESS_TOKEN", "")
+    # Optional JSON object mapping bearer tokens to user IDs or {user_id, role} records.
+    API_ACCESS_TOKENS: str = os.getenv("API_ACCESS_TOKENS", "")
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:8501,http://127.0.0.1:8501")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
