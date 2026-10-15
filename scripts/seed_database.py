@@ -33,11 +33,9 @@ def seed_data():
     sync_postgres_sequences()
     db = SessionLocal()
     
-    if db.query(Customer).count() > 0:
-        print("Database already seeded.")
-        db.close()
-        return
-
+    # Repair partially initialized databases table by table. A populated customer
+    # table must not prevent missing orders, tickets, notifications, or articles
+    # from being seeded on the next startup.
     # Seed Customers
     customers = [
         Customer(id=101, name="Rahul", email="rahul@example.com"),
@@ -46,8 +44,9 @@ def seed_data():
         Customer(id=104, name="Neha", email="neha@example.com"),
         Customer(id=105, name="Amit", email="amit@example.com"),
     ]
-    db.add_all(customers)
-    db.commit()
+    if db.query(Customer).count() == 0:
+        db.add_all(customers)
+        db.commit()
 
     # Seed Orders
     orders = [
@@ -57,23 +56,26 @@ def seed_data():
         Order(id=5004, customer_id=104, status="CANCELLED"),
         Order(id=5005, customer_id=105, status="PENDING"),
     ]
-    db.add_all(orders)
-    db.commit()
+    if db.query(Order).count() == 0:
+        db.add_all(orders)
+        db.commit()
     
     # Seed Tickets
     tickets = [
         SupportTicket(id=1, customer_id=101, issue="Login issue", priority="LOW"),
         SupportTicket(id=2, customer_id=102, issue="Payment failed", priority="HIGH"),
     ]
-    db.add_all(tickets)
-    db.commit()
+    if db.query(SupportTicket).count() == 0:
+        db.add_all(tickets)
+        db.commit()
 
     notifications = [
         Notification(id=1, customer_id=101, message="Your order has shipped.", status="SENT"),
         Notification(id=2, customer_id=102, message="Your order is being processed.", status="SENT"),
     ]
-    db.add_all(notifications)
-    db.commit()
+    if db.query(Notification).count() == 0:
+        db.add_all(notifications)
+        db.commit()
     
     # Seed Knowledge Base
     if db.query(KnowledgeArticle).count() == 0:
