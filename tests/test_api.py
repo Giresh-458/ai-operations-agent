@@ -46,12 +46,20 @@ def test_create_ticket_human_approval():
     
     task_id = data["task_id"]
     
+    # No side effect is allowed before approval.
+    before_tickets = len(client.get("/database").json()["tickets"])
+
     # Approve it
     approve_res = client.post(f"/tasks/{task_id}/approve")
     assert approve_res.status_code == 200
     approve_data = approve_res.json()
     assert approve_data["status"] == "COMPLETED"
     assert "ticket_id" in approve_data["result"]
+    after_tickets = len(client.get("/database").json()["tickets"])
+    assert after_tickets == before_tickets + 1
+
+    duplicate_approval = client.post(f"/tasks/{task_id}/approve")
+    assert duplicate_approval.status_code == 409
 
 def test_update_email():
     response = client.post("/tasks", json={"request": "Update email for customer 101 to example@gmail.com"})
@@ -96,3 +104,17 @@ def test_database_state():
     assert "tickets" in data
     assert "notifications" in data
 
+
+
+def test_rejected_critical_ticket_never_executes():
+    before_tickets = len(client.get("/database").json()["tickets"])
+    response = client.post("/tasks", json={"request": "Create a critical support ticket for customer 101"})
+    assert response.status_code == 200
+    task_id = response.json()["task_id"]
+    assert response.json()["status"] == "WAITING_FOR_APPROVAL"
+    reject_response = client.post(f"/tasks/{task_id}/reject")
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "REJECTED"
+    assert len(client.get("/database").json()["tickets"]) == before_tickets
+    duplicate_rejection = client.post(f"/tasks/{task_id}/reject")
+    assert duplicate_rejection.status_code == 409
