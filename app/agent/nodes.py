@@ -13,6 +13,22 @@ from app.tools.customers import update_customer_email
 from app.tools.notifications import send_notification
 from langgraph.types import interrupt
 
+# Runtime credentials are kept out of checkpointed LangGraph state.
+_RUNTIME_API_KEYS = {}
+
+
+def set_runtime_api_key(task_id: int, api_key: str | None) -> None:
+    if api_key:
+        _RUNTIME_API_KEYS[task_id] = api_key
+
+
+def clear_runtime_api_key(task_id: int) -> None:
+    _RUNTIME_API_KEYS.pop(task_id, None)
+
+
+def get_runtime_api_key(state: AgentState) -> str:
+    return _RUNTIME_API_KEYS.get(state["task_id"]) or settings.OPENAI_API_KEY
+
 def is_valid_key(key: str) -> bool:
     if not key or not isinstance(key, str):
         return False
@@ -81,7 +97,7 @@ Format instructions:
 {format_instructions}"""),
             ("user", "{request}")
         ])
-        active_key = state.get("api_key") or settings.OPENAI_API_KEY
+        active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
             # Mock behavior for tests / offline mode
             req_lower = state["user_request"].lower()
@@ -121,7 +137,7 @@ Format instructions:
             
             output = IntentOutput(intent=intent, parameters=params)
         else:
-            llm = get_llm(state.get("provider", "OpenAI"), state.get("api_key", ""))
+            llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
             chain = prompt | llm | parser
             output = chain.invoke({"request": state["user_request"], "format_instructions": parser.get_format_instructions()})
             
@@ -396,13 +412,13 @@ def grade_docs(state: AgentState) -> AgentState:
             log_audit(db, task_id, "RAG_GRADE", "SUCCESS", "No documents found")
             return state
             
-        active_key = state.get("api_key") or settings.OPENAI_API_KEY
+        active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
             state["is_relevant"] = True
             log_audit(db, task_id, "RAG_GRADE", "SUCCESS", "Mock relevance: True")
             return state
             
-        llm = get_llm(state.get("provider", "OpenAI"), state.get("api_key", ""))
+        llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a grader assessing relevance of a retrieved document to a user question. "
                        "Answer ONLY with 'yes' if relevant or 'no' if irrelevant. No other text."),
@@ -434,14 +450,14 @@ def rewrite_query(state: AgentState) -> AgentState:
         log_audit(db, task_id, "RAG_REWRITE", "STARTED")
         query = state["search_query"]
         
-        active_key = state.get("api_key") or settings.OPENAI_API_KEY
+        active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
             state["search_query"] = query + " policy details"
             state["retry_count"] += 1
             log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", state["search_query"])
             return state
             
-        llm = get_llm(state.get("provider", "OpenAI"), state.get("api_key", ""))
+        llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a question re-writer. Look at the input question and rewrite it to be better optimized for vector database retrieval. Just output the rewritten question and nothing else."),
             ("user", "{question}")
@@ -469,7 +485,7 @@ def generate_answer(state: AgentState) -> AgentState:
         
         context = "\n\n".join([f"Title: {d['title']}\nContent: {d['content']}" for d in docs])
         
-        active_key = state.get("api_key") or settings.OPENAI_API_KEY
+        active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
             state["final_response"] = docs[0]["content"] if docs else "Based on our knowledge base, here is the answer."
             state["status"] = "COMPLETED"
@@ -477,7 +493,7 @@ def generate_answer(state: AgentState) -> AgentState:
             log_audit(db, task_id, "RAG_GENERATE", "SUCCESS", "Mock answer generated")
             return state
             
-        llm = get_llm(state.get("provider", "OpenAI"), state.get("api_key", ""))
+        llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a helpful assistant. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.\n\nContext:\n{context}"),
             ("user", "Question: {question}")
