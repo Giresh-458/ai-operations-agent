@@ -112,7 +112,7 @@ def upgrade() -> None:
 
     # Add missing indexes without duplicating indexes from pre-migration schemas.
     index_specs = {
-        "customers": [("ix_customers_name", ["name"], False), ("ix_customers_email", ["email"], True)],
+        "customers": [("ix_customers_id", ["id"], False), ("ix_customers_name", ["name"], False), ("ix_customers_email", ["email"], True)],
         "knowledge_articles": [("ix_knowledge_articles_id", ["id"], False)],
         "orders": [("ix_orders_id", ["id"], False)],
         "support_tickets": [("ix_support_tickets_id", ["id"], False)],
