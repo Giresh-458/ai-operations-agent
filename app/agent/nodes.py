@@ -5,7 +5,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from app.config import settings
 from app.agent.state import AgentState
 from app.schemas.schemas import IntentOutput
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from app.models.database_models import Task, AuditLog
 from app.tools.tickets import create_support_ticket
 from app.tools.orders import check_order_status
@@ -429,12 +429,12 @@ def retrieve_docs(state: AgentState) -> AgentState:
         embedding_key = settings.OPENAI_API_KEY
         if not is_valid_key(embedding_key) and state.get("provider", "OpenAI") == "OpenAI":
             embedding_key = get_runtime_api_key(state)
-        if is_valid_key(embedding_key):
+        if engine.dialect.name == "postgresql" and is_valid_key(embedding_key):
             embeddings = OpenAIEmbeddings(api_key=embedding_key, max_retries=1)
             vector = embeddings.embed_query(query)
             articles = db.query(KnowledgeArticle).order_by(KnowledgeArticle.embedding.cosine_distance(vector)).limit(3).all()
         else:
-            # Deterministic lexical fallback: never return arbitrary documents.
+            # Deterministic lexical fallback for SQLite/offline mode: never return arbitrary documents.
             terms = _query_terms(query)
             if terms:
                 filters = [KnowledgeArticle.title.ilike(f"%{term}%") | KnowledgeArticle.content.ilike(f"%{term}%") for term in terms]
