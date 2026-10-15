@@ -12,3 +12,5 @@ pgvector
 streamlit
 requests
 pandas
+langgraph-checkpoint-postgres
+psycopg[binary]
