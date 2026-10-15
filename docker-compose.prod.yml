@@ -35,6 +35,7 @@ services:
       MAX_RETRIES: ${MAX_RETRIES:-2}
       ALLOW_OFFLINE_MODE: ${ALLOW_OFFLINE_MODE:-false}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:?API_ACCESS_TOKEN must be set to a random token of at least 32 characters}
+      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://your-ui-domain.example}
     depends_on:
       db:
