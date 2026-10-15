@@ -10,7 +10,7 @@ This repository is a portfolio/demo application. The controls below reduce commo
 - **Transport security:** The Compose ports bind to loopback. Put a reverse proxy with HTTPS in front of the UI/API before remote use.
 - **Request safety:** Parameter validation and heuristic PII/prompt-injection checks are defense-in-depth, not complete detection or authorization. Do not submit real customer data.
 - **Audit trail:** Database audit rows are useful for debugging, but are not immutable or compliance-grade.
-- **Database setup:** The application creates missing tables at startup but does not seed demo records in production. There is no migration framework yet; back up data before schema changes and do not treat automatic table creation as a production migration strategy.
+- **Database setup:** The application applies Alembic migrations before startup and does not seed demo records in production. Back up data before schema changes and review each migration against a staging copy before deployment.
 
 ## 2. Production Docker deployment (VPS / cloud VM)
 
@@ -50,7 +50,7 @@ Generate secrets instead of copying the placeholders. For example:
 openssl rand -hex 32
 ```
 
-Use one generated value for `POSTGRES_PASSWORD` and a separate generated value for the privileged `API_ACCESS_TOKEN`. Do not give the privileged token to ordinary users. For scoped users, set `API_ACCESS_TOKENS` to a JSON object mapping each long random token to a user ID (operator role) or an object such as `{"user_id":"alice","role":"operator"}`; reserve `role=admin` for trusted administrators. Rotate/revoke tokens by updating deployment secrets and restarting the service. Set `CORS_ORIGINS` to the exact browser origins that need access; do not use a wildcard. The Streamlit UI receives `API_ACCESS_TOKEN` as `BACKEND_API_TOKEN` through Compose. Provider API keys can be entered at runtime in the UI or supplied through the environment. Keep `ALLOW_OFFLINE_MODE=false` outside isolated local tests; otherwise deterministic mock intent parsing could execute demo database operations without a real provider credential.
+Use one generated value for `POSTGRES_PASSWORD` and a separate generated value for the privileged `API_ACCESS_TOKEN`. Do not give the privileged token to ordinary users. For scoped users, set `API_ACCESS_TOKENS` to a JSON object mapping each long random token to a user ID or an object such as `{"user_id":"alice","role":"operator"}`; reserve `role=admin` for trusted administrators. Do not give the privileged token to ordinary users. For scoped users, set `API_ACCESS_TOKENS` to a JSON object mapping each long random token to a user ID (operator role) or an object such as `{"user_id":"alice","role":"operator"}`; reserve `role=admin` for trusted administrators. Rotate/revoke tokens by updating deployment secrets and restarting the service. Set `CORS_ORIGINS` to the exact browser origins that need access; do not use a wildcard. The Streamlit UI receives `API_ACCESS_TOKEN` as `BACKEND_API_TOKEN` through Compose. Provider API keys can be entered at runtime in the UI or supplied through the environment. Keep `ALLOW_OFFLINE_MODE=false` outside isolated local tests; otherwise deterministic mock intent parsing could execute demo database operations without a real provider credential.
 
 ### Launch and verify
 
