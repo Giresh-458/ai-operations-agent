@@ -30,6 +30,8 @@ services:
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-AIOpsAgent}
       MAX_RETRIES: 2
+      API_ACCESS_TOKEN: ${API_ACCESS_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501}
     depends_on:
       db:
         condition: service_healthy
@@ -43,6 +45,7 @@ services:
       - .:/app
     environment:
       - BACKEND_URL=http://web:8080
+      - BACKEND_API_TOKEN=${API_ACCESS_TOKEN}
     command: streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
     depends_on:
       - web
