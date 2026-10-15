@@ -6,8 +6,10 @@ os.environ.setdefault("API_ACCESS_TOKEN", "test-token")
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app.database import Base, engine
+from app.database import Base, engine, SessionLocal
 from scripts.seed_database import seed_data
+from app.models.database_models import Task
+from app.agent.nodes import validate_request
 
 # We will use the SQLite in-memory for testing, but let's just stick to the configured test db or SQLite.
 # Actually, since sqlalchemy is setup, we can just use the provided DB in settings but it's risky to clear it.
@@ -137,3 +139,41 @@ def test_operational_api_requires_authentication():
     response = unauthenticated_client.get("/database")
     assert response.status_code == 401
     assert client.get("/health").status_code == 200
+
+def test_empty_task_request_is_rejected():
+    response = client.post("/tasks", json={"request": "   "})
+    assert response.status_code == 422
+
+
+def test_oversized_task_request_is_rejected():
+    response = client.post("/tasks", json={"request": "x" * 4001})
+    assert response.status_code == 422
+
+
+def test_unsupported_provider_is_rejected():
+    response = client.post("/tasks", json={"request": "Check order 5001", "provider": "Unknown"})
+    assert response.status_code == 422
+
+
+def test_invalid_email_parameter_fails_validation():
+    db = SessionLocal()
+    try:
+        task = Task(user_request="Update customer email", status="PENDING")
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        task_id = task.id
+    finally:
+        db.close()
+
+    state = {
+        "task_id": task_id,
+        "user_request": "Update email for customer 101",
+        "intent": "UPDATE_EMAIL",
+        "parameters": {"customer_id": 101, "new_email": "not-an-email"},
+        "status": "PENDING",
+        "retry_count": 0,
+    }
+    result = validate_request(state)
+    assert result["validation_result"] is False
+    assert "valid email address" in result["validation_message"]
