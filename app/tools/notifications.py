@@ -9,7 +9,7 @@ def send_notification(db: Session, customer_id: int, message: str) -> dict:
     notification = Notification(
         customer_id=customer_id,
         message=message,
-        status="SENT"
+        status="SIMULATED"
     )
     db.add(notification)
     db.commit()
@@ -17,5 +17,6 @@ def send_notification(db: Session, customer_id: int, message: str) -> dict:
     
     return {
         "notification_id": notification.id,
-        "status": notification.status
+        "status": notification.status,
+        "delivery": "simulated; no email or SMS provider is configured"
     }
