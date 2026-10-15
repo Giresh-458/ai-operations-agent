@@ -6,7 +6,7 @@ import argparse
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.agent.graph import build_graph
-from app.agent.nodes import is_valid_key
+from app.agent.nodes import is_valid_key, set_runtime_api_key, clear_runtime_api_key
 from app.config import settings
 from app.database import SessionLocal
 from app.models.database_models import Task
@@ -75,7 +75,6 @@ def main():
             "task_id": task_id,
             "user_request": test["request"],
             "provider": provider,
-            "api_key": api_key,
             "status": "PENDING",
             "retry_count": 0
         }
@@ -83,7 +82,13 @@ def main():
         try:
             import time
             start_t = time.perf_counter()
-            result_state = agent_app.invoke(initial_state)
+            set_runtime_api_key(task_id, api_key)
+            try:
+                result_state = agent_app.invoke(
+                    initial_state, config={"configurable": {"thread_id": str(task_id)}}
+                )
+            finally:
+                clear_runtime_api_key(task_id)
             duration_ms = (time.perf_counter() - start_t) * 1000
             latencies.append(duration_ms)
             
