@@ -184,10 +184,44 @@ def validate_request(state: AgentState) -> AgentState:
             for p in ["customer_id", "message"]:
                 if p not in params: missing.append(p)
                 
+        invalid = []
+        import re
+
+        def positive_int(value):
+            return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+        if intent == "CREATE_TICKET":
+            if "customer_id" in params and not positive_int(params["customer_id"]):
+                invalid.append("customer_id must be a positive integer")
+            if "issue" in params and (not isinstance(params["issue"], str) or not params["issue"].strip() or len(params["issue"]) > 1000):
+                invalid.append("issue must be a non-empty string of at most 1000 characters")
+            if "priority" in params:
+                if not isinstance(params["priority"], str) or params["priority"].upper() not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+                    invalid.append("priority must be LOW, MEDIUM, HIGH, or CRITICAL")
+                else:
+                    params["priority"] = params["priority"].upper()
+        elif intent == "CHECK_ORDER":
+            if "order_id" in params and not positive_int(params["order_id"]):
+                invalid.append("order_id must be a positive integer")
+        elif intent == "UPDATE_EMAIL":
+            if "customer_id" in params and not positive_int(params["customer_id"]):
+                invalid.append("customer_id must be a positive integer")
+            if "new_email" in params and (not isinstance(params["new_email"], str) or len(params["new_email"]) > 254 or not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", params["new_email"])):
+                invalid.append("new_email must be a valid email address")
+        elif intent == "SEND_NOTIFICATION":
+            if "customer_id" in params and not positive_int(params["customer_id"]):
+                invalid.append("customer_id must be a positive integer")
+            if "message" in params and (not isinstance(params["message"], str) or not params["message"].strip() or len(params["message"]) > 2000):
+                invalid.append("message must be a non-empty string of at most 2000 characters")
+
         if missing:
             state["validation_result"] = False
             state["validation_message"] = f"Please provide the missing information: {', '.join(missing)}."
             log_audit(db, task_id, "VALIDATION_FAILED", "SUCCESS", f"Missing: {missing}")
+        elif invalid:
+            state["validation_result"] = False
+            state["validation_message"] = "Invalid request parameters: " + "; ".join(invalid) + "."
+            log_audit(db, task_id, "VALIDATION_FAILED", "SUCCESS", state["validation_message"])
         else:
             state["validation_result"] = True
             log_audit(db, task_id, "VALIDATION_SUCCESS", "SUCCESS")
