@@ -470,9 +470,9 @@ def rewrite_query(state: AgentState) -> AgentState:
         
         active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
-            state["search_query"] = query + " policy details"
+            # Keep the original query in offline mode; generic terms can make unrelated documents look relevant.
             state["retry_count"] += 1
-            log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", state["search_query"])
+            log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", "Offline query retained")
             return state
             
         llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
@@ -487,8 +487,9 @@ def rewrite_query(state: AgentState) -> AgentState:
         state["search_query"] = result.content.strip()
         state["retry_count"] += 1
         log_audit(db, task_id, "RAG_REWRITE", "SUCCESS", state["search_query"])
-    except Exception as e:
-        log_audit(db, task_id, "RAG_REWRITE", "FAILED", str(e))
+    except Exception:
+        state["retry_count"] = state.get("retry_count", 0) + 1
+        log_audit(db, task_id, "RAG_REWRITE", "FAILED", "Query rewrite failed")
     finally:
         db.close()
     return state
