@@ -121,11 +121,16 @@ def main():
         except Exception as e:
             print(f"[ERROR] Test Crashed: {str(e)}")
             
-    avg_latency = sum(latencies)/len(latencies) if latencies else 0
     print("\n" + "="*50)
     print(f"Final Score: {passed} / {len(test_cases)} Passed ({passed/len(test_cases)*100:.0f}%)")
-    print(f"Average Latency: {avg_latency:.1f}ms (Min: {min(latencies):.1f}ms, Max: {max(latencies):.1f}ms)")
+    if latencies:
+        avg_latency = sum(latencies) / len(latencies)
+        print(f"Average Latency: {avg_latency:.1f}ms (Min: {min(latencies):.1f}ms, Max: {max(latencies):.1f}ms)")
+    else:
+        print("No timing measurements were collected.")
     print("="*50 + "\n")
+    if passed != len(test_cases):
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
