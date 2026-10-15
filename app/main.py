@@ -17,8 +17,7 @@ if engine.dialect.name == "postgresql":
 # Initialize the demo schema and seed data. Fail startup if initialization fails;
 # serving traffic with a partially initialized database hides a real deployment error.
 Base.metadata.create_all(bind=engine)
-from scripts.seed_database import seed_data
-seed_data()
+# Demo fixtures are seeded explicitly by local/dev scripts, never during API startup.
 
 from fastapi.middleware.cors import CORSMiddleware
 
