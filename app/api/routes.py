@@ -310,7 +310,19 @@ def get_database_state(db: Session = Depends(get_db)):
     return {
         'customers': [{'id': c.id, 'name': c.name} for c in customers],
         'orders': [{'id': o.id, 'customer_id': o.customer_id, 'status': o.status} for o in orders],
-        'tickets': [{'id': t.id, 'customer_id': t.customer_id, 'issue': t.issue, 'priority': t.priority, 'status': t.status} for t in tickets],
+        # Ticket issue text can contain user-provided personal data; redact common
+        # identifiers before exposing it in the explorer.
+        'tickets': [
+            {
+                'id': t.id,
+                'customer_id': t.customer_id,
+                'issue': _redact_sensitive_text(t.issue or ""),
+                'priority': t.priority,
+                'status': t.status,
+            }
+            for t in tickets
+        ],
+        # Do not expose customer emails or notification bodies in the explorer.
         'notifications': [{'id': n.id, 'customer_id': n.customer_id, 'status': n.status} for n in notifications]
     }
 
