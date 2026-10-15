@@ -1,9 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from app.api.routes import router
 from app.database import Base, engine
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 import os
+import secrets
+from app.config import settings
 
 from sqlalchemy import text
 
@@ -27,12 +29,25 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AI Operations Automation Agent", version="1.0.0")
 
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    if request.url.path == "/health" or request.method == "OPTIONS":
+        return await call_next(request)
+    configured_token = settings.API_ACCESS_TOKEN
+    if not configured_token:
+        return JSONResponse(status_code=503, content={"detail": "API_ACCESS_TOKEN must be configured"})
+    supplied_token = request.headers.get("Authorization", "")
+    expected_token = "Bearer " + configured_token
+    if not secrets.compare_digest(supplied_token, expected_token):
+        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(router)
