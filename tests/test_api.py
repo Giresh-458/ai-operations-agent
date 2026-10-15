@@ -1,6 +1,7 @@
 import os
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 os.environ["OPENAI_API_KEY"] = "mock_key"
+os.environ["API_ACCESS_TOKEN"] = "test-token"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,8 @@ from scripts.seed_database import seed_data
 # The user said "Mock OpenAI API calls where appropriate. Tests should not require a real API call."
 # Our config.py sets OPENAI_API_KEY="mock_key" by default and nodes.py handles it!
 
-client = TestClient(app)
+client = TestClient(app, headers={"Authorization": "Bearer test-token"})
+unauthenticated_client = TestClient(app)
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_db():
@@ -104,6 +106,8 @@ def test_database_state():
     assert "orders" in data
     assert "tickets" in data
     assert "notifications" in data
+    if data["customers"]:
+        assert "email" not in data["customers"][0]
 
 
 
@@ -127,3 +131,9 @@ def test_rag_refuses_when_no_relevant_evidence_exists():
     data = response.json()
     assert data["intent"] == "KNOWLEDGE_QUERY"
     assert "could not find enough relevant information" in data["result"]["message"].lower()
+
+
+def test_operational_api_requires_authentication():
+    response = unauthenticated_client.get("/database")
+    assert response.status_code == 401
+    assert client.get("/health").status_code == 200
