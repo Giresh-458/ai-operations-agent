@@ -146,10 +146,10 @@ Format instructions:
         update_task_status(db, task_id, "VALIDATING", intent=output.intent, parameters=output.parameters)
         log_audit(db, task_id, "INTENT_DETECTED", "SUCCESS", json.dumps({"intent": output.intent}))
     except Exception as e:
-        log_audit(db, task_id, "INTENT_DETECTED", "FAILED", str(e))
+        log_audit(db, task_id, "INTENT_DETECTED", "FAILED", type(e).__name__)
         state["status"] = "FAILED"
-        state["final_response"] = f"Failed to understand request: {str(e)}"
-        update_task_status(db, task_id, "FAILED")
+        state["final_response"] = "The request could not be interpreted safely. Please retry with a clearer request."
+        update_task_status(db, task_id, "FAILED", result={"message": state["final_response"]})
     finally:
         db.close()
     return state
@@ -236,9 +236,11 @@ def validate_request(state: AgentState) -> AgentState:
                     log_audit(db, task_id, "HUMAN_APPROVAL_REQUIRED", "SUCCESS")
             
     except Exception as e:
-        log_audit(db, task_id, "VALIDATION_STARTED", "FAILED", str(e))
+        log_audit(db, task_id, "VALIDATION_STARTED", "FAILED", type(e).__name__)
         state["status"] = "FAILED"
-        update_task_status(db, task_id, "FAILED")
+        state["validation_result"] = False
+        state["validation_message"] = "Request validation failed. No operation was executed."
+        update_task_status(db, task_id, "FAILED", result={"message": state["validation_message"]})
     finally:
         db.close()
         
@@ -318,8 +320,9 @@ def execute_tool(state: AgentState) -> AgentState:
         state["tool_result"] = result
         log_audit(db, task_id, "TOOL_EXECUTED", "SUCCESS", json.dumps(result))
     except Exception as e:
-        state["tool_result"] = {"error": str(e)}
-        log_audit(db, task_id, "TOOL_EXECUTED", "FAILED", str(e))
+        # Keep internal database/provider details out of API responses and audit logs.
+        state["tool_result"] = {"error": "Operation failed. Verify the supplied IDs and try again."}
+        log_audit(db, task_id, "TOOL_EXECUTED", "FAILED", type(e).__name__)
     finally:
         db.close()
         
@@ -444,7 +447,7 @@ def retrieve_docs(state: AgentState) -> AgentState:
         state["documents"] = docs
         log_audit(db, task_id, "RAG_RETRIEVE", "SUCCESS", json.dumps([d["title"] for d in docs]))
     except Exception as e:
-        log_audit(db, task_id, "RAG_RETRIEVE", "FAILED", str(e))
+        log_audit(db, task_id, "RAG_RETRIEVE", "FAILED", type(e).__name__)
         state["documents"] = []
     finally:
         db.close()
