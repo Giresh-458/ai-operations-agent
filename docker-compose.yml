@@ -32,6 +32,7 @@ services:
       MAX_RETRIES: 2
       ALLOW_OFFLINE_MODE: ${ALLOW_OFFLINE_MODE:-false}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN}
+      API_ACCESS_TOKENS: ${API_ACCESS_TOKENS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501}
     depends_on:
       db:
