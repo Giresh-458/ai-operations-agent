@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, AuditLogResponse, ProviderValidationRequest
+from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, AuditLogResponse, ProviderValidationRequest, ApprovalRequest
 from app.models.database_models import Task, AuditLog
 from app.agent.graph import agent_app
 from app.agent.state import AgentState
-from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key
+from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key, is_valid_key
 
 router = APIRouter()
 
@@ -208,7 +208,10 @@ def get_task_logs(task_id: int, db: Session = Depends(get_db)):
     ]
 
 @router.post("/tasks/{task_id}/approve")
-def approve_task(task_id: int, db: Session = Depends(get_db)):
+def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+    if req and req.api_key and not is_valid_key(req.api_key):
+        raise HTTPException(status_code=422, detail="A valid provider API key is required.")
+
     # Atomically claim the waiting task so concurrent/double approvals cannot
     # resume the same checkpoint and execute the side effect twice.
     claimed = (
@@ -223,6 +226,10 @@ def approve_task(task_id: int, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Task not found")
         raise HTTPException(status_code=409, detail="Task is not waiting for approval or has already been handled")
     try:
+        if req and req.api_key:
+            # The initial request clears process-local credentials after pausing.
+            # Restore the user-supplied key only for this resume, never checkpoint it.
+            set_runtime_api_key(task_id, req.api_key)
         agent_app.invoke(
             Command(resume="approved"),
             config={"configurable": {"thread_id": str(task_id)}},
@@ -235,6 +242,8 @@ def approve_task(task_id: int, db: Session = Depends(get_db)):
             task.result = json.dumps({"message": "Approval resumption failed. Inspect the audit log before manual recovery."})
             db.commit()
         raise HTTPException(status_code=500, detail="Approval processing failed; inspect task status and audit log.") from exc
+    finally:
+        clear_runtime_api_key(task_id)
     db.expire_all()
     task = db.query(Task).filter(Task.id == task_id).first()
     if task is None:
