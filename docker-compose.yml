@@ -37,7 +37,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "PYTHONPATH=/app python scripts/seed_database.py && PYTHONPATH=/app python -m app.main"
+    command: sh -c "PYTHONPATH=/app alembic upgrade head && PYTHONPATH=/app python scripts/seed_database.py && PYTHONPATH=/app python -m app.main"
 
   ui:
     build: .
