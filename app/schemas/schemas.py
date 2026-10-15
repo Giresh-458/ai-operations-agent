@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Literal
 
 class TaskRequest(BaseModel):
     request: Optional[str] = Field(default=None, max_length=4000)
@@ -34,5 +34,12 @@ class AuditLogResponse(BaseModel):
     status: str
 
 class IntentOutput(BaseModel):
-    intent: str
+    intent: Literal[
+        "CREATE_TICKET",
+        "CHECK_ORDER",
+        "UPDATE_EMAIL",
+        "SEND_NOTIFICATION",
+        "KNOWLEDGE_QUERY",
+        "UNSUPPORTED",
+    ]
     parameters: Dict[str, Any]
