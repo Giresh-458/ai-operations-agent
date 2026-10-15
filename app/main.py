@@ -15,8 +15,7 @@ if engine.dialect.name == "postgresql":
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-# Initialize the demo schema and seed data. Fail startup if initialization fails;
-# serving traffic with a partially initialized database hides a real deployment error.
+# Initialize missing tables. This is a demo bootstrap, not a replacement for migrations.
 Base.metadata.create_all(bind=engine)
 # Demo fixtures are seeded explicitly by local/dev scripts, never during API startup.
 
