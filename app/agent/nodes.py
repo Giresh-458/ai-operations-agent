@@ -366,6 +366,17 @@ def final_response(state: AgentState) -> AgentState:
 
 from app.models.database_models import KnowledgeArticle
 from langchain_openai import OpenAIEmbeddings
+from sqlalchemy import or_
+
+
+def _query_terms(text: str) -> set[str]:
+    import re
+    stop_words = {"the", "and", "for", "what", "is", "are", "was", "were", "how", "to", "a", "an", "of", "in", "on", "my", "your", "with"}
+    return {token.rstrip("s") for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) > 2 and token not in stop_words}
+
+
+def _lexical_score(query: str, title: str, content: str) -> int:
+    return len(_query_terms(query) & _query_terms(title + " " + content))
 
 def retrieve_docs(state: AgentState) -> AgentState:
     db = SessionLocal()
