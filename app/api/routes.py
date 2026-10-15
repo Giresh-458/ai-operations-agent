@@ -40,6 +40,8 @@ def validate_provider(req: ProviderValidationRequest):
         raise HTTPException(status_code=400, detail="Provider not selected")
     if not req.api_key:
         raise HTTPException(status_code=400, detail="API key is required")
+    if req.provider not in {"OpenAI", "Groq"}:
+        raise HTTPException(status_code=400, detail="Unsupported provider")
     
     try:
         from langchain_openai import ChatOpenAI
@@ -53,14 +55,20 @@ def validate_provider(req: ProviderValidationRequest):
             llm = ChatOpenAI(model=settings.GROQ_MODEL, api_key=req.api_key, base_url="https://api.groq.com/openai/v1", max_retries=0)
             llm.invoke("Hello")
             return {"message": "Groq connected successfully.", "model": settings.GROQ_MODEL}
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported provider")
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(status_code=401, detail="Provider connection failed; verify the provider and key.")
 
 @router.post("/tasks", response_model=TaskResponse)
 def create_task(req: TaskRequest, db: Session = Depends(get_db)):
-    req_text = req.get_request_text()
+    req_text = req.get_request_text().strip()
+    if not req_text:
+        raise HTTPException(status_code=422, detail="Request text must not be empty.")
+    if len(req_text) > 4000:
+        raise HTTPException(status_code=422, detail="Request text must be at most 4000 characters.")
+    if req.provider not in {"OpenAI", "Groq"}:
+        raise HTTPException(status_code=422, detail="Provider must be OpenAI or Groq.")
     task = Task(user_request=req_text, status="PENDING")
     db.add(task)
     db.commit()
