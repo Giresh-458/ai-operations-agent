@@ -53,7 +53,7 @@ async def require_api_token(request: Request, call_next):
     if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"} or request.method == "OPTIONS":
         return await call_next(request)
     configured_token = settings.API_ACCESS_TOKEN
-    if not configured_token or configured_token.lower().startswith("replace_"):
+    if not configured_token or configured_token.lower().startswith("replace_") or len(configured_token) < 32:
         return JSONResponse(status_code=503, content={"detail": "API_ACCESS_TOKEN must be configured"})
     supplied_token = request.headers.get("Authorization", "")
     expected_token = "Bearer " + configured_token
