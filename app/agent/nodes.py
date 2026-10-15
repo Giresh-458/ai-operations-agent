@@ -165,7 +165,7 @@ def validate_request(state: AgentState) -> AgentState:
         intent = state.get("intent")
         params = state.get("parameters", {})
         
-        if intent == "UNSUPPORTED":
+        if intent not in {"CREATE_TICKET", "CHECK_ORDER", "UPDATE_EMAIL", "SEND_NOTIFICATION"}:
             state["validation_result"] = False
             state["validation_message"] = "I can currently help with support tickets, order status, customer email updates, and notifications."
             log_audit(db, task_id, "VALIDATION_FAILED", "SUCCESS", state["validation_message"])
