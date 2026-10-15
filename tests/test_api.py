@@ -11,6 +11,7 @@ from scripts.seed_database import seed_data
 from app.models.database_models import Task
 from app.agent.nodes import validate_request
 from app.config import settings
+from app.api import routes
 
 # We will use the SQLite in-memory for testing, but let's just stick to the configured test db or SQLite.
 # Actually, since sqlalchemy is setup, we can just use the provided DB in settings but it's risky to clear it.
@@ -250,3 +251,49 @@ def test_unknown_intent_is_rejected():
     }
     result = validate_request(state)
     assert result["validation_result"] is False
+
+def test_approval_restores_transient_provider_key(monkeypatch):
+    db = SessionLocal()
+    try:
+        task = Task(
+            user_request="Create a critical support ticket",
+            status="WAITING_FOR_APPROVAL",
+            requires_human="WAITING",
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        task_id = task.id
+    finally:
+        db.close()
+
+    set_calls = []
+    clear_calls = []
+    invoke_calls = []
+
+    monkeypatch.setattr(
+        routes,
+        "set_runtime_api_key",
+        lambda received_task_id, key: set_calls.append((received_task_id, key)),
+    )
+    monkeypatch.setattr(
+        routes,
+        "clear_runtime_api_key",
+        lambda received_task_id: clear_calls.append(received_task_id),
+    )
+    monkeypatch.setattr(
+        routes.agent_app,
+        "invoke",
+        lambda command, config: invoke_calls.append((command, config)),
+    )
+
+    response = client.post(
+        f"/tasks/{task_id}/approve",
+        json={"provider": "OpenAI", "api_key": "unit-test-live-provider-key"},
+    )
+
+    assert response.status_code == 200
+    assert set_calls == [(task_id, "unit-test-live-provider-key")]
+    assert clear_calls == [task_id]
+    assert len(invoke_calls) == 1
+    assert invoke_calls[0][1]["configurable"]["thread_id"] == str(task_id)
