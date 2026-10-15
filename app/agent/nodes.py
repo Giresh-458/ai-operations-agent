@@ -560,7 +560,7 @@ def generate_answer(state: AgentState) -> AgentState:
             
         llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "Answer using only the retrieved evidence. If it does not support an answer, say you do not know. Keep the answer concise and cite the title of the source document.\\n\\nContext:\\n{context}"),
+            ("system", "Answer using only the retrieved evidence. If it does not support an answer, say you do not know. Keep the answer concise and cite the title of the source document.\n\nContext:\n{context}"),
             ("user", "Question: {question}")
         ])
         
