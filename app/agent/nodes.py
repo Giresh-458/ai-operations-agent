@@ -445,18 +445,18 @@ def grade_docs(state: AgentState) -> AgentState:
         
         chain = prompt | llm
         
-        is_relevant = False
+        relevant_docs = []
         for doc in docs:
             result = chain.invoke({"question": query, "document": doc["content"]})
-            if "yes" in result.content.lower():
-                is_relevant = True
-                break
-                
-        state["is_relevant"] = is_relevant
-        log_audit(db, task_id, "RAG_GRADE", "SUCCESS", f"Relevant: {is_relevant}")
-    except Exception as e:
-        log_audit(db, task_id, "RAG_GRADE", "FAILED", str(e))
-        state["is_relevant"] = True # fail open
+            if result.content.strip().lower() in {"yes", "yes."}:
+                relevant_docs.append(doc)
+        state["documents"] = relevant_docs
+        state["is_relevant"] = bool(relevant_docs)
+        log_audit(db, task_id, "RAG_GRADE", "SUCCESS", f"Relevant documents: {len(relevant_docs)}")
+    except Exception:
+        log_audit(db, task_id, "RAG_GRADE", "FAILED", "Relevance grading failed")
+        state["documents"] = []
+        state["is_relevant"] = False
     finally:
         db.close()
     return state
