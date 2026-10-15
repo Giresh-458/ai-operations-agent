@@ -33,11 +33,9 @@ def seed_data():
     sync_postgres_sequences()
     db = SessionLocal()
     
-    if db.query(Customer).count() > 0:
-        print("Database already seeded.")
-        db.close()
-        return
-
+    # Repair partially initialized databases table by table. A populated customer
+    # table must not prevent missing orders, tickets, notifications, or articles
+    # from being seeded on the next startup.
     # Seed Customers
     customers = [
         Customer(id=101, name="Rahul", email="rahul@example.com"),
@@ -46,8 +44,11 @@ def seed_data():
         Customer(id=104, name="Neha", email="neha@example.com"),
         Customer(id=105, name="Amit", email="amit@example.com"),
     ]
-    db.add_all(customers)
-    db.commit()
+    existing_customer_ids = {row[0] for row in db.query(Customer.id).all()}
+    missing_customers = [row for row in customers if row.id not in existing_customer_ids]
+    if missing_customers:
+        db.add_all(missing_customers)
+        db.commit()
 
     # Seed Orders
     orders = [
@@ -57,32 +58,43 @@ def seed_data():
         Order(id=5004, customer_id=104, status="CANCELLED"),
         Order(id=5005, customer_id=105, status="PENDING"),
     ]
-    db.add_all(orders)
-    db.commit()
+    existing_order_ids = {row[0] for row in db.query(Order.id).all()}
+    missing_orders = [row for row in orders if row.id not in existing_order_ids]
+    if missing_orders:
+        db.add_all(missing_orders)
+        db.commit()
     
     # Seed Tickets
     tickets = [
         SupportTicket(id=1, customer_id=101, issue="Login issue", priority="LOW"),
         SupportTicket(id=2, customer_id=102, issue="Payment failed", priority="HIGH"),
     ]
-    db.add_all(tickets)
-    db.commit()
+    existing_ticket_ids = {row[0] for row in db.query(SupportTicket.id).all()}
+    missing_tickets = [row for row in tickets if row.id not in existing_ticket_ids]
+    if missing_tickets:
+        db.add_all(missing_tickets)
+        db.commit()
 
     notifications = [
         Notification(id=1, customer_id=101, message="Your order has shipped.", status="SENT"),
         Notification(id=2, customer_id=102, message="Your order is being processed.", status="SENT"),
     ]
-    db.add_all(notifications)
-    db.commit()
+    existing_notification_ids = {row[0] for row in db.query(Notification.id).all()}
+    missing_notifications = [row for row in notifications if row.id not in existing_notification_ids]
+    if missing_notifications:
+        db.add_all(missing_notifications)
+        db.commit()
     
-    # Seed Knowledge Base
-    if db.query(KnowledgeArticle).count() == 0:
-        articles = [
-            {"title": "Return Policy", "content": "Customers can return items within 30 days of receipt. Items must be in original condition."},
-            {"title": "Support SLA", "content": "Critical issues are responded to within 1 hour. High priority within 4 hours. Normal priority within 24 hours."},
-            {"title": "Lost Package", "content": "If a package is lost, wait 5 days after the expected delivery date before creating a replacement ticket."}
-        ]
-        
+    # Seed missing knowledge articles without duplicating existing titles.
+    articles = [
+        {"title": "Return Policy", "content": "Customers can return items within 30 days of receipt. Items must be in original condition."},
+        {"title": "Support SLA", "content": "Critical issues are responded to within 1 hour. High priority within 4 hours. Normal priority within 24 hours."},
+        {"title": "Lost Package", "content": "If a package is lost, wait 5 days after the expected delivery date before creating a replacement ticket."}
+    ]
+    existing_article_titles = {row[0] for row in db.query(KnowledgeArticle.title).all()}
+    missing_articles = [article for article in articles if article["title"] not in existing_article_titles]
+
+    if missing_articles:
         from app.config import settings
         from langchain_openai import OpenAIEmbeddings
 
@@ -95,7 +107,7 @@ def seed_data():
                         content=article["content"],
                         embedding=embeddings.embed_query(article["content"]),
                     )
-                    for article in articles
+                    for article in missing_articles
                 ]
                 db.add_all(embedded_articles)
                 db.commit()
@@ -104,13 +116,13 @@ def seed_data():
                 print(f"Skipping vector embedding generation ({type(exc).__name__}); using lexical retrieval.")
                 db.add_all([
                     KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
-                    for article in articles
+                    for article in missing_articles
                 ])
                 db.commit()
         else:
             db.add_all([
                 KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
-                for article in articles
+                for article in missing_articles
             ])
             db.commit()
 

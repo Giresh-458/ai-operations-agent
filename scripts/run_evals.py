@@ -8,7 +8,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.agent.graph import build_graph
 from app.agent.nodes import is_valid_key, set_runtime_api_key, clear_runtime_api_key
 from app.config import settings
-from app.database import SessionLocal
+from app.database import Base, SessionLocal, engine
+from scripts.seed_database import seed_data
 from app.models.database_models import Task
 
 def main():
@@ -16,6 +17,10 @@ def main():
     parser.add_argument("--provider", default=os.getenv("LLM_PROVIDER", "Groq" if os.getenv("GROQ_API_KEY") else "OpenAI"))
     parser.add_argument("--api-key", default=os.getenv("GROQ_API_KEY") or os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY or "mock_key")
     args = parser.parse_args()
+
+    # Make the documented standalone command work on a fresh local database.
+    Base.metadata.create_all(bind=engine)
+    seed_data()
 
     provider = args.provider
     raw_key = args.api_key
@@ -132,6 +137,7 @@ def main():
         except Exception as e:
             print(f"[ERROR] Test Crashed: {str(e)}")
             
+    db.close()
     print("\n" + "="*50)
     print(f"Final Score: {passed} / {len(test_cases)} Passed ({passed/len(test_cases)*100:.0f}%)")
     if latencies:

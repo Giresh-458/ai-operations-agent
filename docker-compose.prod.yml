@@ -6,8 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
       POSTGRES_DB: ${POSTGRES_DB:-operations_agent}
-    # Note: In production, port 5432 is NOT exposed publicly.
-    # It is only accessible to services on the internal network.
+    # The database is reachable only on the internal Docker network.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +23,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080" # Bound only to localhost for reverse proxy
+      - "127.0.0.1:8080:8080"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-operations_agent}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -33,10 +32,19 @@ services:
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-AIOpsAgent}
-      MAX_RETRIES: 2
+      MAX_RETRIES: ${MAX_RETRIES:-2}
+      ALLOW_OFFLINE_MODE: ${ALLOW_OFFLINE_MODE:-false}
+      API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:?API_ACCESS_TOKEN must be set to a random token of at least 32 characters}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://your-ui-domain.example}
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     command: sh -c "PYTHONPATH=/app python scripts/seed_database.py && PYTHONPATH=/app python -m app.main"
     networks:
       - internal_network
@@ -47,9 +55,10 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8501:8501" # Bound only to localhost for reverse proxy
+      - "127.0.0.1:8501:8501"
     environment:
-      - BACKEND_URL=http://web:8080
+      BACKEND_URL: http://web:8080
+      BACKEND_API_TOKEN: ${API_ACCESS_TOKEN:?API_ACCESS_TOKEN must be set to a random token of at least 32 characters}
     command: >
       streamlit run streamlit_app.py
       --server.port 8501
@@ -58,7 +67,14 @@ services:
       --server.enableXsrfProtection true
       --browser.gatherUsageStats false
     depends_on:
-      - web
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - internal_network
 

@@ -2,12 +2,30 @@ let currentTaskId = null;
 let previousSnapshot = null;
 let currentProvider = null;
 let currentApiKey = null;
+let currentAccessToken = null;
+
+// Attach the shared API token to same-origin API requests without persisting it.
+// The token remains in page memory and is cleared when the provider connection is reset.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    if (currentAccessToken) headers.set('Authorization', `Bearer ${currentAccessToken}`);
+    return nativeFetch(input, { ...init, headers });
+};
 
 async function connectProvider() {
     const provider = document.getElementById('providerSelect').value;
-    const apiKey = document.getElementById('apiKeyInput').value;
+    const apiKey = document.getElementById('apiKeyInput').value.trim();
+    const accessToken = document.getElementById('apiAccessTokenInput').value.trim();
     const errDiv = document.getElementById('providerError');
     errDiv.style.display = 'none';
+
+    if (!accessToken) {
+        errDiv.textContent = 'Please enter the API access token configured by the backend operator.';
+        errDiv.style.display = 'block';
+        return;
+    }
+    currentAccessToken = accessToken;
 
     if (!provider) {
         errDiv.textContent = 'Please select a provider.';
@@ -30,8 +48,11 @@ async function connectProvider() {
         const data = await res.json();
         
         if (!res.ok) {
-            errDiv.textContent = data.detail || 'Unable to connect. Please check your API key.';
+            errDiv.textContent = data.detail || 'Unable to connect. Please check your API access token and provider key.';
             errDiv.style.display = 'block';
+            if (res.status === 401 && String(data.detail || '').toLowerCase().includes('authentication required')) {
+                currentAccessToken = null;
+            }
             return;
         }
 
@@ -49,7 +70,9 @@ async function connectProvider() {
         document.getElementById('heroCardSection').style.pointerEvents = 'auto';
         document.getElementById('requestCardSection').style.opacity = '1';
         document.getElementById('requestCardSection').style.pointerEvents = 'auto';
-        
+        await refreshDatabaseView();
+        await loadTaskHistory();
+
     } catch (e) {
         errDiv.textContent = 'Network error while connecting.';
         errDiv.style.display = 'block';
@@ -59,8 +82,10 @@ async function connectProvider() {
 function changeProvider() {
     currentProvider = null;
     currentApiKey = null;
-    
+    currentAccessToken = null;
+
     document.getElementById('apiKeyInput').value = '';
+    document.getElementById('apiAccessTokenInput').value = '';
     
     document.getElementById('providerSetupForm').style.display = 'block';
     document.getElementById('providerConnectedState').style.display = 'none';
@@ -292,13 +317,13 @@ async function refreshDatabaseView() {
             o => `<tr><td>#${escapeHtml(o.id)}</td><td>${escapeHtml(o.customer_id)}</td><td>${statusPill(o.status)}</td></tr>`, 3);
 
         renderRows('customersTable', data.customers,
-            c => `<tr><td>#${escapeHtml(c.id)}</td><td><b>${escapeHtml(c.name)}</b></td><td>${escapeHtml(c.email)}</td></tr>`, 3);
+            c => `<tr><td>#${escapeHtml(c.id)}</td><td><b>${escapeHtml(c.name)}</b></td><td>${escapeHtml('Hidden for privacy')}</td></tr>`, 3);
 
         renderRows('ticketsTable', data.tickets,
             t => `<tr><td>#${escapeHtml(t.id)}</td><td>${escapeHtml(t.customer_id)}</td><td>${escapeHtml(t.issue)}</td><td>${statusPill(t.priority)}</td><td>${statusPill(t.status)}</td></tr>`, 5);
 
         renderRows('notificationsTable', data.notifications,
-            n => `<tr><td>#${escapeHtml(n.id)}</td><td>${escapeHtml(n.customer_id)}</td><td>${escapeHtml(n.message)}</td><td>${statusPill(n.status)}</td></tr>`, 4);
+            n => `<tr><td>#${escapeHtml(n.id)}</td><td>${escapeHtml(n.customer_id)}</td><td>${escapeHtml('Hidden for privacy')}</td><td>${statusPill(n.status)}</td></tr>`, 4);
 
         if (previousSnapshot) {
             const changed = [];

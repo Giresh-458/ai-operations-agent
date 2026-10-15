@@ -9,6 +9,7 @@ from app.models.database_models import Task, AuditLog
 from app.agent.graph import agent_app
 from app.agent.state import AgentState
 from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key, is_valid_key
+from app.config import settings
 
 router = APIRouter()
 
@@ -55,17 +56,19 @@ def validate_provider(req: ProviderValidationRequest):
         raise HTTPException(status_code=400, detail="API key is required")
     if req.provider not in {"OpenAI", "Groq"}:
         raise HTTPException(status_code=400, detail="Unsupported provider")
-    
+    provider_key = req.api_key.strip()
+    if not is_valid_key(provider_key):
+        raise HTTPException(status_code=400, detail="A valid provider API key is required.")
+
     try:
         from langchain_openai import ChatOpenAI
-        from app.config import settings
-        
+
         if req.provider == "OpenAI":
-            llm = ChatOpenAI(model=settings.OPENAI_MODEL, api_key=req.api_key, max_retries=0)
+            llm = ChatOpenAI(model=settings.OPENAI_MODEL, api_key=provider_key, max_retries=0)
             llm.invoke("Hello")
             return {"message": "OpenAI connected successfully.", "model": settings.OPENAI_MODEL}
         elif req.provider == "Groq":
-            llm = ChatOpenAI(model=settings.GROQ_MODEL, api_key=req.api_key, base_url="https://api.groq.com/openai/v1", max_retries=0)
+            llm = ChatOpenAI(model=settings.GROQ_MODEL, api_key=provider_key, base_url="https://api.groq.com/openai/v1", max_retries=0)
             llm.invoke("Hello")
             return {"message": "Groq connected successfully.", "model": settings.GROQ_MODEL}
     except HTTPException:
@@ -82,6 +85,18 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Request text must be at most 4000 characters.")
     if req.provider not in {"OpenAI", "Groq"}:
         raise HTTPException(status_code=422, detail="Provider must be OpenAI or Groq.")
+
+    provider_key = req.api_key.strip() if isinstance(req.api_key, str) else None
+    if req.api_key is not None and not is_valid_key(provider_key or ""):
+        raise HTTPException(status_code=422, detail="A valid provider API key is required.")
+    configured_key = settings.OPENAI_API_KEY if req.provider == "OpenAI" else ""
+    active_key = provider_key or configured_key
+    if not is_valid_key(active_key) and not settings.ALLOW_OFFLINE_MODE:
+        raise HTTPException(
+            status_code=503,
+            detail="A provider API key is required; deterministic offline mode is disabled.",
+        )
+
     task = Task(user_request=_redact_sensitive_text(req_text), status="PENDING")
     db.add(task)
     db.commit()
@@ -133,7 +148,7 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     }
     
     # Run the graph synchronously
-    set_runtime_api_key(task.id, req.api_key)
+    set_runtime_api_key(task.id, provider_key)
     try:
         result_state = agent_app.invoke(
             state, config={"configurable": {"thread_id": str(task.id)}}
@@ -209,7 +224,7 @@ def get_task_logs(task_id: int, db: Session = Depends(get_db)):
 
 @router.post("/tasks/{task_id}/approve")
 def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
-    if req and req.api_key and not is_valid_key(req.api_key):
+    if req and req.api_key and not is_valid_key(req.api_key.strip()):
         raise HTTPException(status_code=422, detail="A valid provider API key is required.")
 
     # Atomically claim the waiting task so concurrent/double approvals cannot
@@ -229,7 +244,7 @@ def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session =
         if req and req.api_key:
             # The initial request clears process-local credentials after pausing.
             # Restore the user-supplied key only for this resume, never checkpoint it.
-            set_runtime_api_key(task_id, req.api_key)
+            set_runtime_api_key(task_id, req.api_key.strip())
         agent_app.invoke(
             Command(resume="approved"),
             config={"configurable": {"thread_id": str(task_id)}},
@@ -310,7 +325,19 @@ def get_database_state(db: Session = Depends(get_db)):
     return {
         'customers': [{'id': c.id, 'name': c.name} for c in customers],
         'orders': [{'id': o.id, 'customer_id': o.customer_id, 'status': o.status} for o in orders],
-        'tickets': [{'id': t.id, 'customer_id': t.customer_id, 'issue': t.issue, 'priority': t.priority, 'status': t.status} for t in tickets],
+        # Ticket issue text can contain user-provided personal data; redact common
+        # identifiers before exposing it in the explorer.
+        'tickets': [
+            {
+                'id': t.id,
+                'customer_id': t.customer_id,
+                'issue': _redact_sensitive_text(t.issue or ""),
+                'priority': t.priority,
+                'status': t.status,
+            }
+            for t in tickets
+        ],
+        # Do not expose customer emails or notification bodies in the explorer.
         'notifications': [{'id': n.id, 'customer_id': n.customer_id, 'status': n.status} for n in notifications]
     }
 

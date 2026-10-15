@@ -64,6 +64,7 @@ flowchart TD
 
 ### 1. Multi-Provider LLM Engine (Groq + OpenAI)
 - **Request-scoped credentials**: User-supplied provider keys are not written to task rows or LangGraph checkpoints. They are held in Streamlit session state and process-local memory; this design is for a single-process demo, not a multi-worker credential service.
+- **Offline mode is opt-in**: `ALLOW_OFFLINE_MODE=false` by default. Set it to `true` only for isolated deterministic tests/demo data; do not enable it against real operational data because mock intent parsing can still invoke database tools.
 - **Provider choice**: Supports OpenAI-compatible chat models from OpenAI and Groq. Latency and cost depend on the selected model and request; no fixed performance advantage is assumed.
 - **Connection Pre-Flight Validator**: The `/validate_provider` endpoint performs live handshakes and active model verification before initializing the agent.
 
@@ -155,8 +156,9 @@ docker-compose up -d --build
 | Service | URL | Description |
 |---|---|---|
 | **Streamlit Python UI** | **[http://localhost:8501](http://localhost:8501)** | Interactive web console |
+| **FastAPI static dashboard** | **[http://localhost:8080/app/index.html](http://localhost:8080/app/index.html)** | Enter the configured API access token and provider key; the token is kept only in page memory |
 | **FastAPI Backend & Swagger** | **[http://localhost:8080/docs](http://localhost:8080/docs)** | Interactive OpenAPI documentation |
-| **PostgreSQL Database** | `localhost:5432` | Relational DB + `pgvector` store |
+| **PostgreSQL Database** | `localhost:5432` | Relational DB + `pgvector` store (development Compose only) |
 
 ---
 
@@ -192,6 +194,7 @@ Send `Authorization: Bearer <API_ACCESS_TOKEN>` with operational API requests. `
 | `POST` | `/tasks/{id}/reject` | Explicitly rejects a task paused in `WAITING_FOR_APPROVAL`. |
 | `GET` | `/database` | Returns a redacted operational data view for the UI. |
 | `GET` | `/health` | Public service liveness probe. |
+| `GET` | `/ready` | Public readiness probe; checks database connectivity. |
 
 ---
 
