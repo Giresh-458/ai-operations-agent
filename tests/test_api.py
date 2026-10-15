@@ -1,7 +1,7 @@
 import os
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("OPENAI_API_KEY", "mock_key")
-os.environ.setdefault("API_ACCESS_TOKEN", "test-token")
+os.environ.setdefault("API_ACCESS_TOKEN", "test-token-for-ci-only-0123456789abcdef")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +17,7 @@ from app.agent.nodes import validate_request
 # The user said "Mock OpenAI API calls where appropriate. Tests should not require a real API call."
 # Our config.py sets OPENAI_API_KEY="mock_key" by default and nodes.py handles it!
 
-client = TestClient(app, headers={"Authorization": "Bearer test-token"})
+client = TestClient(app, headers={"Authorization": "Bearer test-token-for-ci-only-0123456789abcdef"})
 unauthenticated_client = TestClient(app)
 
 @pytest.fixture(scope="session", autouse=True)
