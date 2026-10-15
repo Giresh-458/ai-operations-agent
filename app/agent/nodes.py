@@ -27,7 +27,13 @@ def clear_runtime_api_key(task_id: int) -> None:
 
 
 def get_runtime_api_key(state: AgentState) -> str:
-    return _RUNTIME_API_KEYS.get(state["task_id"]) or settings.OPENAI_API_KEY
+    runtime_key = _RUNTIME_API_KEYS.get(state["task_id"])
+    if runtime_key:
+        return runtime_key
+    # Never send an OpenAI credential to Groq (or another provider endpoint).
+    if state.get("provider", "OpenAI") == "OpenAI":
+        return settings.OPENAI_API_KEY
+    return ""
 
 def is_valid_key(key: str) -> bool:
     if not key or not isinstance(key, str):
