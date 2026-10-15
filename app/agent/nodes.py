@@ -191,7 +191,7 @@ Format instructions:
         safe_parameters = dict(output.parameters or {})
         # Keep the actual email only in process memory for the immediate tool call.
         new_email = safe_parameters.get("new_email")
-        if isinstance(new_email, str) and re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", new_email):
+        if isinstance(new_email, str) and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
             set_runtime_sensitive_parameter(task_id, "new_email", new_email)
             safe_parameters["new_email"] = "[REDACTED_EMAIL]"
         state["parameters"] = safe_parameters
