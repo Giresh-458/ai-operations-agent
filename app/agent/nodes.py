@@ -11,6 +11,7 @@ from app.tools.tickets import create_support_ticket
 from app.tools.orders import check_order_status
 from app.tools.customers import update_customer_email
 from app.tools.notifications import send_notification
+from langgraph.types import interrupt
 
 def is_valid_key(key: str) -> bool:
     if not key or not isinstance(key, str):
@@ -193,6 +194,33 @@ def validate_request(state: AgentState) -> AgentState:
         
     return state
 
+def request_human_approval(state: AgentState) -> AgentState:
+    """Pause until the API resumes this task with an explicit decision."""
+    decision = interrupt({
+        "type": "human_approval_required",
+        "task_id": state["task_id"],
+        "intent": state.get("intent"),
+        "parameters": state.get("parameters", {}),
+        "message": "Approve or reject this critical operation.",
+    })
+    db = SessionLocal()
+    task_id = state["task_id"]
+    try:
+        if decision == "approved":
+            state["requires_human"] = "APPROVED"
+            state["status"] = "RUNNING"
+            update_task_status(db, task_id, "RUNNING", requires_human="APPROVED")
+            log_audit(db, task_id, "HUMAN_APPROVED", "SUCCESS")
+        else:
+            state["requires_human"] = "REJECTED"
+            state["status"] = "REJECTED"
+            state["final_response"] = "Task rejected by human."
+            update_task_status(db, task_id, "REJECTED", result={"message": state["final_response"]}, requires_human="REJECTED")
+            log_audit(db, task_id, "HUMAN_REJECTED", "SUCCESS")
+    finally:
+        db.close()
+    return state
+
 def select_tool(state: AgentState) -> AgentState:
     if state.get("status") == "FAILED" or not state.get("validation_result"):
         return state
@@ -281,12 +309,21 @@ def final_response(state: AgentState) -> AgentState:
     db = SessionLocal()
     task_id = state["task_id"]
     try:
-        if not state.get("validation_result"):
-            state["final_response"] = state.get("validation_message", "Validation failed.")
-            update_task_status(db, task_id, "COMPLETED", result={"message": state["final_response"]})
+        if state.get("is_safe") is False:
+            state["status"] = "FAILED"
+            state["final_response"] = state.get("validation_message", "Security guardrail blocked this request.")
+            update_task_status(db, task_id, "FAILED", result={"message": state["final_response"]})
+            log_audit(db, task_id, "TASK_BLOCKED", "FAILED")
+        elif state.get("status") == "REJECTED" or state.get("requires_human") == "REJECTED":
+            state["status"] = "REJECTED"
+            state["final_response"] = "Task rejected by human."
+            update_task_status(db, task_id, "REJECTED", result={"message": state["final_response"]}, requires_human="REJECTED")
         elif state.get("requires_human") == "WAITING":
             state["final_response"] = "Human approval is required before creating this critical ticket."
-            # Status remains WAITING_FOR_APPROVAL
+        elif not state.get("validation_result"):
+            state["status"] = "FAILED"
+            state["final_response"] = state.get("validation_message", "Validation failed.")
+            update_task_status(db, task_id, "FAILED", result={"message": state["final_response"]})
         elif state.get("status") == "COMPLETED":
             result = state.get("tool_result", {})
             if state.get("intent") == "CHECK_ORDER":
@@ -299,17 +336,18 @@ def final_response(state: AgentState) -> AgentState:
                 state["final_response"] = f"Notification {result.get('notification_id')} sent."
             else:
                 state["final_response"] = json.dumps(result)
-            
             update_task_status(db, task_id, "COMPLETED", result=result)
             log_audit(db, task_id, "TASK_COMPLETED", "SUCCESS")
-        elif state.get("status") == "FAILED":
-            state["final_response"] = "Task failed to complete. " + str(state.get("tool_result", {}).get("error", ""))
+        elif state.get("status") in ("FAILED", "ERROR"):
+            state["status"] = "FAILED"
+            error = state.get("tool_result", {}).get("error", "")
+            state["final_response"] = "Task failed to complete. " + str(error)
             update_task_status(db, task_id, "FAILED", result={"error": state["final_response"]})
-            log_audit(db, task_id, "TASK_FAILED", "SUCCESS")
-            
+            log_audit(db, task_id, "TASK_FAILED", "FAILED")
     finally:
         db.close()
     return state
+
 from app.models.database_models import KnowledgeArticle
 from langchain_openai import OpenAIEmbeddings
 
@@ -489,8 +527,11 @@ def guardrail_check(state: AgentState) -> AgentState:
         state["is_safe"] = True
         log_audit(db, task_id, "GUARDRAIL_CHECK", "SUCCESS", "Request is safe")
     except Exception as e:
-        log_audit(db, task_id, "GUARDRAIL_CHECK", "ERROR", str(e))
-        state["is_safe"] = True # Fail open for safety of execution if script breaks
+        # Fail closed: do not execute downstream tools if validation itself fails.
+        log_audit(db, task_id, "GUARDRAIL_CHECK", "ERROR", "Guardrail evaluation failed")
+        state["is_safe"] = False
+        state["status"] = "FAILED"
+        state["validation_message"] = "Security Guardrail Error: the request could not be safely validated."
     finally:
         db.close()
     return state
