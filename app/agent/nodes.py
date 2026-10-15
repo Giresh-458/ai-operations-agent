@@ -373,9 +373,13 @@ def final_response(state: AgentState) -> AgentState:
             update_task_status(db, task_id, "REJECTED", result={"message": state["final_response"]}, requires_human="REJECTED")
         elif state.get("requires_human") == "WAITING":
             state["final_response"] = "Human approval is required before creating this critical ticket."
-        elif not state.get("validation_result"):
+        elif state.get("status") == "FAILED" or not state.get("validation_result"):
             state["status"] = "FAILED"
-            state["final_response"] = state.get("validation_message", "Validation failed.")
+            state["final_response"] = (
+                state.get("final_response")
+                or state.get("validation_message")
+                or "Validation failed."
+            )
             update_task_status(db, task_id, "FAILED", result={"message": state["final_response"]})
         elif state.get("status") == "COMPLETED":
             result = state.get("tool_result", {})
