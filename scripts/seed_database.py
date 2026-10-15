@@ -94,7 +94,7 @@ def seed_data():
                     db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=vector))
             else:
                 for article in articles:
-                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
+                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=None))
             db.commit()
         except Exception as e:
             print(f"Skipping vector embedding generation (Mock mode or invalid key): {e}")
