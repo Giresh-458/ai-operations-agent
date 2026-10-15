@@ -64,6 +64,7 @@ flowchart TD
 
 ### 1. Multi-Provider LLM Engine (Groq + OpenAI)
 - **Request-scoped credentials**: User-supplied provider keys are not written to task rows or LangGraph checkpoints. They are held in Streamlit session state and process-local memory; this design is for a single-process demo, not a multi-worker credential service.
+- **Offline mode is opt-in**: `ALLOW_OFFLINE_MODE=false` by default. Set it to `true` only for isolated deterministic tests/demo data; do not enable it against real operational data because mock intent parsing can still invoke database tools.
 - **Provider choice**: Supports OpenAI-compatible chat models from OpenAI and Groq. Latency and cost depend on the selected model and request; no fixed performance advantage is assumed.
 - **Connection Pre-Flight Validator**: The `/validate_provider` endpoint performs live handshakes and active model verification before initializing the agent.
 
