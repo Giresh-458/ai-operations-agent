@@ -523,7 +523,7 @@ def generate_answer(state: AgentState) -> AgentState:
             
         llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a helpful assistant. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.\n\nContext:\n{context}"),
+            ("system", "Answer using only the retrieved evidence. If it does not support an answer, say you do not know. Keep the answer concise and cite the title of the source document.\\n\\nContext:\\n{context}"),
             ("user", "Question: {question}")
         ])
         
@@ -534,10 +534,11 @@ def generate_answer(state: AgentState) -> AgentState:
         state["status"] = "COMPLETED"
         update_task_status(db, task_id, "COMPLETED", result={"message": state["final_response"]})
         log_audit(db, task_id, "RAG_GENERATE", "SUCCESS")
-    except Exception as e:
-        log_audit(db, task_id, "RAG_GENERATE", "FAILED", str(e))
-        state["status"] = "ERROR"
-        state["final_response"] = f"Failed to generate answer: {str(e)}"
+    except Exception:
+        log_audit(db, task_id, "RAG_GENERATE", "FAILED", "Answer generation failed")
+        state["status"] = "FAILED"
+        state["final_response"] = "The knowledge answer could not be generated safely. Please try again later."
+        update_task_status(db, task_id, "FAILED", result={"message": state["final_response"]})
     finally:
         db.close()
     return state
