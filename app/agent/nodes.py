@@ -501,12 +501,18 @@ def generate_answer(state: AgentState) -> AgentState:
         log_audit(db, task_id, "RAG_GENERATE", "STARTED")
         query = state["search_query"]
         docs = state.get("documents", [])
+        if not docs or state.get("is_relevant") is not True:
+            state["final_response"] = "I could not find enough relevant information in the knowledge base to answer confidently."
+            state["status"] = "COMPLETED"
+            update_task_status(db, task_id, "COMPLETED", result={"message": state["final_response"]})
+            log_audit(db, task_id, "RAG_GENERATE", "SUCCESS", "Declined due to insufficient relevant evidence")
+            return state
         
         context = "\n\n".join([f"Title: {d['title']}\nContent: {d['content']}" for d in docs])
         
         active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
-            state["final_response"] = docs[0]["content"] if docs else "Based on our knowledge base, here is the answer."
+            state["final_response"] = "\n\n".join([d["title"] + ": " + d["content"] for d in docs])
             state["status"] = "COMPLETED"
             update_task_status(db, task_id, "COMPLETED", result={"message": state["final_response"]})
             log_audit(db, task_id, "RAG_GENERATE", "SUCCESS", "Mock answer generated")
