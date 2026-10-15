@@ -85,21 +85,33 @@ def seed_data():
         
         from app.config import settings
         from langchain_openai import OpenAIEmbeddings
-        
-        try:
-            if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "mock_key":
+
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "mock_key":
+            try:
                 embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
-                for article in articles:
-                    vector = embeddings.embed_query(article["content"])
-                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=vector))
-            else:
-                for article in articles:
-                    db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=None))
-            db.commit()
-        except Exception as e:
-            print(f"Skipping vector embedding generation (Mock mode or invalid key): {e}")
-            for article in articles:
-                db.add(KnowledgeArticle(title=article["title"], content=article["content"], embedding=[0.0]*1536))
+                embedded_articles = [
+                    KnowledgeArticle(
+                        title=article["title"],
+                        content=article["content"],
+                        embedding=embeddings.embed_query(article["content"]),
+                    )
+                    for article in articles
+                ]
+                db.add_all(embedded_articles)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                print(f"Skipping vector embedding generation ({type(exc).__name__}); using lexical retrieval.")
+                db.add_all([
+                    KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
+                    for article in articles
+                ])
+                db.commit()
+        else:
+            db.add_all([
+                KnowledgeArticle(title=article["title"], content=article["content"], embedding=None)
+                for article in articles
+            ])
             db.commit()
 
     sync_postgres_sequences()
