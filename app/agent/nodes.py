@@ -206,7 +206,7 @@ def validate_request(state: AgentState) -> AgentState:
         elif intent == "UPDATE_EMAIL":
             if "customer_id" in params and not positive_int(params["customer_id"]):
                 invalid.append("customer_id must be a positive integer")
-            if "new_email" in params and (not isinstance(params["new_email"], str) or len(params["new_email"]) > 254 or not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", params["new_email"])):
+            if "new_email" in params and (not isinstance(params["new_email"], str) or len(params["new_email"]) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", params["new_email"])):
                 invalid.append("new_email must be a valid email address")
         elif intent == "SEND_NOTIFICATION":
             if "customer_id" in params and not positive_int(params["customer_id"]):
