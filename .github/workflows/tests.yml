@@ -20,6 +20,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Validate frontend JavaScript syntax
+        run: node --check frontend/script.js
+      - name: Validate Docker Compose configuration
+        env:
+          POSTGRES_PASSWORD: test-password-for-compose-validation
+          API_ACCESS_TOKEN: test-token-for-ci-only-0123456789abcdef
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
