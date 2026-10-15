@@ -1,5 +1,6 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from langgraph.types import Command
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, AuditLogResponse, ProviderValidationRequest
@@ -27,7 +28,7 @@ def run_agent(task_id: int, request_text: str):
     }
     # This invoke is synchronous, so it will block. 
     # For a real background task, it's fine.
-    agent_app.invoke(state)
+    agent_app.invoke(state, config={"configurable": {"thread_id": str(task_id)}})
 
 @router.get("/health")
 def health_check():
@@ -89,7 +90,9 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     }
     
     # Run the graph synchronously
-    result_state = agent_app.invoke(state)
+    result_state = agent_app.invoke(
+        state, config={"configurable": {"thread_id": str(task.id)}}
+    )
     
     # Refresh task from DB
     db.commit()
@@ -159,70 +162,77 @@ def get_task_logs(task_id: int, db: Session = Depends(get_db)):
 
 @router.post("/tasks/{task_id}/approve")
 def approve_task(task_id: int, db: Session = Depends(get_db)):
+    # Atomically claim the waiting task so concurrent/double approvals cannot
+    # resume the same checkpoint and execute the side effect twice.
+    claimed = (
+        db.query(Task)
+        .filter(Task.id == task_id, Task.status == "WAITING_FOR_APPROVAL")
+        .update({Task.status: "APPROVAL_IN_PROGRESS"}, synchronize_session=False)
+    )
+    db.commit()
+    if claimed != 1:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=409, detail="Task is not waiting for approval or has already been handled")
+    try:
+        agent_app.invoke(
+            Command(resume="approved"),
+            config={"configurable": {"thread_id": str(task_id)}},
+        )
+    except Exception as exc:
+        # Do not reset to WAITING: the operation may already have committed.
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task and task.status == "APPROVAL_IN_PROGRESS":
+            task.status = "FAILED"
+            task.result = json.dumps({"message": "Approval resumption failed. Inspect the audit log before manual recovery."})
+            db.commit()
+        raise HTTPException(status_code=500, detail="Approval processing failed; inspect task status and audit log.") from exc
+    db.expire_all()
     task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or task.status != "WAITING_FOR_APPROVAL":
-        raise HTTPException(status_code=400, detail="Task is not waiting for approval")
-        
-    log_audit(db, task_id, "HUMAN_APPROVED", "SUCCESS")
-    
-    # Resume the graph by setting requires_human to APPROVED and re-invoking
-    # In LangGraph you'd normally use checkpointing for this, but for simplicity
-    # we can recreate the state up to the execution step.
-    state: AgentState = {
-        "task_id": task_id,
-        "user_request": task.user_request,
-        "intent": task.intent,
-        "parameters": json.loads(task.parameters) if task.parameters else {},
-        "validation_result": True,
-        "validation_message": None,
-        "selected_tool": task.intent,
-        "tool_result": None,
-        "status": "RUNNING",
-        "retry_count": task.retry_count,
-        "requires_human": "APPROVED",
-        "final_response": None
-    }
-    
-    from app.agent.nodes import execute_tool, check_result, final_response, select_tool
-    state = execute_tool(state)
-    state = check_result(state)
-    state = final_response(state)
-    db.commit() # End current transaction to see changes from SessionLocal
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if state.get("status") in ["COMPLETED", "FAILED", "ERROR"]:
-        task.status = state.get("status") if state.get("status") != "ERROR" else "FAILED"
-        if state.get("tool_result"):
-            task.result = json.dumps(state.get("tool_result"))
-        db.commit()
-    db.refresh(task)
-    res = None
-    if task.result:
-        res = json.loads(task.result)
-    
-    params = json.loads(task.parameters) if task.parameters else {}
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
     return TaskResponse(
         task_id=task.id,
         status=task.status,
         intent=task.intent,
         selected_tool=task.intent,
-        parameters=params,
-        result=res
+        parameters=json.loads(task.parameters) if task.parameters else {},
+        result=json.loads(task.result) if task.result else None,
+        requires_human=task.requires_human,
     )
+
 
 @router.post("/tasks/{task_id}/reject")
 def reject_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task or task.status != "WAITING_FOR_APPROVAL":
-        raise HTTPException(status_code=400, detail="Task is not waiting for approval")
-        
-    task.status = "REJECTED"
-    task.requires_human = "REJECTED"
-    task.result = json.dumps({"message": "Task rejected by human."})
+    # Same atomic claim as approval; each task can receive only one decision.
+    claimed = (
+        db.query(Task)
+        .filter(Task.id == task_id, Task.status == "WAITING_FOR_APPROVAL")
+        .update({Task.status: "REJECTION_IN_PROGRESS"}, synchronize_session=False)
+    )
     db.commit()
-    
-    log_audit(db, task_id, "HUMAN_REJECTED", "SUCCESS")
-    
-    return {"status": "REJECTED"}
+    if claimed != 1:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=409, detail="Task is not waiting for approval or has already been handled")
+    try:
+        agent_app.invoke(
+            Command(resume="rejected"),
+            config={"configurable": {"thread_id": str(task_id)}},
+        )
+    except Exception as exc:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if task and task.status == "REJECTION_IN_PROGRESS":
+            task.status = "FAILED"
+            task.result = json.dumps({"message": "Rejection resumption failed; inspect the audit log."})
+            db.commit()
+        raise HTTPException(status_code=500, detail="Rejection processing failed; inspect task status and audit log.") from exc
+    db.expire_all()
+    task = db.query(Task).filter(Task.id == task_id).first()
+    return {"status": task.status if task else "REJECTED"}
+
 
 @router.get('/database')
 def get_database_state(db: Session = Depends(get_db)):
