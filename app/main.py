@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from app.api.routes import router
-from app.database import Base, engine
+from app.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
@@ -15,8 +15,6 @@ if engine.dialect.name == "postgresql":
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-# Initialize missing tables. This is a demo bootstrap, not a replacement for migrations.
-Base.metadata.create_all(bind=engine)
 # Demo fixtures are seeded explicitly by local/dev scripts, never during API startup.
 
 from fastapi.middleware.cors import CORSMiddleware
