@@ -389,8 +389,11 @@ def retrieve_docs(state: AgentState) -> AgentState:
         
         # Try Vector Search
         from app.config import settings
-        if is_valid_key(settings.OPENAI_API_KEY):
-            embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY, max_retries=1)
+        embedding_key = settings.OPENAI_API_KEY
+        if not is_valid_key(embedding_key) and state.get("provider", "OpenAI") == "OpenAI":
+            embedding_key = get_runtime_api_key(state)
+        if is_valid_key(embedding_key):
+            embeddings = OpenAIEmbeddings(api_key=embedding_key, max_retries=1)
             vector = embeddings.embed_query(query)
             articles = db.query(KnowledgeArticle).order_by(KnowledgeArticle.embedding.cosine_distance(vector)).limit(3).all()
         else:
