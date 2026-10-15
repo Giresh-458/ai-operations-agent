@@ -122,7 +122,7 @@ ai-operations-agent/
 │   └── test_api.py                # API integration test suite
 ├── Dockerfile                     # Container definition for API and UI
 ├── docker-compose.yml             # 3-tier orchestration (db, web, ui)
-├── requirements.txt               # Pinned Python dependencies
+├── requirements.txt               # Python dependencies
 ├── streamlit_app.py               # Python Streamlit frontend
 ├── .env.example                   # Environment configuration template
 └── README.md                      # Project documentation
@@ -140,7 +140,7 @@ ai-operations-agent/
 ```bash
 cp .env.example .env
 ```
-Before starting, replace `API_ACCESS_TOKEN` in `.env` with a long, random secret. The API rejects operational requests when this token is missing or still set to the example placeholder. The Streamlit service receives the same token through Docker Compose. Set `CORS_ORIGINS` to the exact browser origins you use.
+Before starting, replace `API_ACCESS_TOKEN` in `.env` with a random secret of at least 32 characters. The API rejects operational requests when this token is missing, too short, or still set to the example placeholder. The Streamlit service receives the same token through Docker Compose. Set `CORS_ORIGINS` to the exact browser origins you use.
 
 *(The LLM provider key can be supplied in `.env` or entered dynamically in the Streamlit UI at runtime.)*
 
@@ -179,6 +179,8 @@ The script prints the observed pass count and timing for that run. Results are n
 
 ## REST API Reference
 
+Send `Authorization: Bearer <API_ACCESS_TOKEN>` with operational API requests. `/health`, `/docs`, and `/openapi.json` are public; the token is a shared demo credential, not per-user authorization.
+
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/validate_provider` | Tests and verifies provider credentials (Groq/OpenAI) and returns active model ID. |
@@ -188,7 +190,8 @@ The script prints the observed pass count and timing for that run. Results are n
 | `GET` | `/tasks/{id}/logs` | Retrieves granular audit trail logs for all execution stages. |
 | `POST` | `/tasks/{id}/approve` | Approves a task paused in `WAITING_FOR_APPROVAL` and resumes execution. |
 | `POST` | `/tasks/{id}/reject` | Explicitly rejects a task paused in `WAITING_FOR_APPROVAL`. |
-| `GET` | `/health` | Service liveness probe. |
+| `GET` | `/database` | Returns a redacted operational data view for the UI. |
+| `GET` | `/health` | Public service liveness probe. |
 
 ---
 
