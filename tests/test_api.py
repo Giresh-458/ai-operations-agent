@@ -397,3 +397,23 @@ def test_notification_is_not_misreported_as_delivered():
         assert row.status == "SIMULATED"
     finally:
         db.close()
+
+
+def test_scoped_api_tokens_enforce_task_ownership(monkeypatch):
+    import json
+    token_a = "user-a-token-0123456789abcdef012345"
+    token_b = "user-b-token-0123456789abcdef012345"
+    monkeypatch.setattr(settings, "API_ACCESS_TOKENS", json.dumps({token_a: "alice", token_b: "bob"}))
+    user_a = TestClient(app, headers={"Authorization": f"Bearer {token_a}"})
+    user_b = TestClient(app, headers={"Authorization": f"Bearer {token_b}"})
+
+    created = user_a.post("/tasks", json={"request": "Check order 5001"})
+    assert created.status_code == 200
+    task_id = created.json()["task_id"]
+
+    assert user_a.get(f"/tasks/{task_id}").status_code == 200
+    assert user_b.get(f"/tasks/{task_id}").status_code == 404
+    assert user_b.get(f"/tasks/{task_id}/logs").status_code == 404
+    assert user_b.post(f"/tasks/{task_id}/approve").status_code == 404
+    assert all(row["id"] != task_id for row in user_b.get("/tasks").json())
+    assert user_b.get("/database").status_code == 403
