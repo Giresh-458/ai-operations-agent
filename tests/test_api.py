@@ -228,3 +228,25 @@ def test_weak_configured_api_token_fails_closed(monkeypatch):
     weak_client = TestClient(app, headers={"Authorization": "Bearer short"})
     response = weak_client.get("/database")
     assert response.status_code == 503
+
+def test_unknown_intent_is_rejected():
+    db = SessionLocal()
+    try:
+        task = Task(user_request="Delete all data", status="PENDING")
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        task_id = task.id
+    finally:
+        db.close()
+
+    state = {
+        "task_id": task_id,
+        "user_request": "Delete all data",
+        "intent": "DELETE_DATABASE",
+        "parameters": {},
+        "status": "PENDING",
+        "retry_count": 0,
+    }
+    result = validate_request(state)
+    assert result["validation_result"] is False
