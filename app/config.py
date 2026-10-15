@@ -13,6 +13,8 @@ class Settings(BaseSettings):
         "postgresql://postgres:postgres@localhost:5432/operations_agent"
     )
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "2"))
+    API_ACCESS_TOKEN: str = os.getenv("API_ACCESS_TOKEN", "")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:8501,http://127.0.0.1:8501")
 
     class Config:
         env_file = ".env"
