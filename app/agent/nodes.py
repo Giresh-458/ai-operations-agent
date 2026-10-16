@@ -1,4 +1,5 @@
 import json
+import re
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -13,8 +14,33 @@ from app.tools.customers import update_customer_email
 from app.tools.notifications import send_notification
 from langgraph.types import interrupt
 
-# Runtime credentials are kept out of checkpointed LangGraph state.
+# Credentials, raw requests, and sensitive extracted values are process-local and
+# never placed in checkpointed LangGraph state. This supports a single-process demo;
+# use a dedicated secret store before deploying multiple workers.
 _RUNTIME_API_KEYS = {}
+_RUNTIME_REQUESTS = {}
+_RUNTIME_SENSITIVE_PARAMS = {}
+
+
+def set_runtime_request(task_id: int, request_text: str) -> None:
+    _RUNTIME_REQUESTS[task_id] = request_text
+
+
+def clear_runtime_request(task_id: int) -> None:
+    _RUNTIME_REQUESTS.pop(task_id, None)
+    _RUNTIME_SENSITIVE_PARAMS.pop(task_id, None)
+
+
+def get_runtime_request(state: AgentState) -> str:
+    return _RUNTIME_REQUESTS.get(state["task_id"], state.get("user_request", ""))
+
+
+def set_runtime_sensitive_parameter(task_id: int, name: str, value: str) -> None:
+    _RUNTIME_SENSITIVE_PARAMS.setdefault(task_id, {})[name] = value
+
+
+def get_runtime_sensitive_parameter(task_id: int, name: str):
+    return _RUNTIME_SENSITIVE_PARAMS.get(task_id, {}).get(name)
 
 
 def set_runtime_api_key(task_id: int, api_key: str | None) -> None:
@@ -73,8 +99,8 @@ def _redact_persisted_parameters(parameters):
     safe = dict(parameters)
     for key, value in safe.items():
         if isinstance(value, str):
-            value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
-            value = re.sub(r"\b\d{4}(?:[- ]\d{4}){3}\b", "[REDACTED_CARD_NUMBER]", value)
+            value = re.sub(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)", "[REDACTED_SSN]", value)
+            value = re.sub(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", "[REDACTED_CARD_NUMBER]", value)
             value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
             safe[key] = value
     return safe
@@ -121,10 +147,9 @@ Format instructions:
         active_key = get_runtime_api_key(state)
         if not is_valid_key(active_key):
             # Mock behavior for tests / offline mode
-            req_lower = state["user_request"].lower()
+            req_lower = get_runtime_request(state).lower()
             intent = "UNSUPPORTED"
             params = {}
-            import re
             if "order" in req_lower:
                 intent = "CHECK_ORDER"
                 match = re.search(r"order(?:\s*(?:number|#|id))?\s*(\d+)", req_lower)
@@ -139,7 +164,7 @@ Format instructions:
             elif "email" in req_lower:
                 intent = "UPDATE_EMAIL"
                 customer_match = re.search(r"customer\s*(?:id|#)?\s*(\d+)", req_lower)
-                email_match = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", req_lower)
+                email_match = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", get_runtime_request(state), re.I)
                 params = {
                     "customer_id": int(customer_match.group(1)) if customer_match else 101,
                     "new_email": email_match.group(0) if email_match else "example@gmail.com"
@@ -160,11 +185,17 @@ Format instructions:
         else:
             llm = get_llm(state.get("provider", "OpenAI"), get_runtime_api_key(state))
             chain = prompt | llm | parser
-            output = chain.invoke({"request": state["user_request"], "format_instructions": parser.get_format_instructions()})
+            output = chain.invoke({"request": get_runtime_request(state), "format_instructions": parser.get_format_instructions()})
             
         state["intent"] = output.intent
-        state["parameters"] = output.parameters
-        update_task_status(db, task_id, "VALIDATING", intent=output.intent, parameters=output.parameters)
+        raw_parameters = dict(output.parameters or {})
+        # Keep the actual email only in process memory for the immediate tool call.
+        new_email = raw_parameters.get("new_email")
+        if isinstance(new_email, str) and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
+            set_runtime_sensitive_parameter(task_id, "new_email", new_email)
+        safe_parameters = _redact_persisted_parameters(raw_parameters)
+        state["parameters"] = safe_parameters
+        update_task_status(db, task_id, "VALIDATING", intent=output.intent, parameters=safe_parameters)
         log_audit(db, task_id, "INTENT_DETECTED", "SUCCESS", json.dumps({"intent": output.intent}))
     except Exception as e:
         log_audit(db, task_id, "INTENT_DETECTED", "FAILED", type(e).__name__)
@@ -184,7 +215,10 @@ def validate_request(state: AgentState) -> AgentState:
     try:
         log_audit(db, task_id, "VALIDATION_STARTED", "STARTED")
         intent = state.get("intent")
-        params = state.get("parameters", {})
+        params = dict(state.get("parameters") or {})
+        runtime_email = get_runtime_sensitive_parameter(task_id, "new_email")
+        if intent == "UPDATE_EMAIL" and runtime_email:
+            params["new_email"] = runtime_email
         
         if intent not in {"CREATE_TICKET", "CHECK_ORDER", "UPDATE_EMAIL", "SEND_NOTIFICATION"}:
             state["validation_result"] = False
@@ -323,7 +357,10 @@ def execute_tool(state: AgentState) -> AgentState:
     db = SessionLocal()
     task_id = state["task_id"]
     tool = state.get("selected_tool")
-    params = state.get("parameters", {})
+    params = dict(state.get("parameters") or {})
+    runtime_email = get_runtime_sensitive_parameter(task_id, "new_email")
+    if tool == "UPDATE_EMAIL" and runtime_email:
+        params["new_email"] = runtime_email
     
     try:
         log_audit(db, task_id, "TOOL_EXECUTED", "STARTED", tool)
@@ -411,7 +448,7 @@ def final_response(state: AgentState) -> AgentState:
             elif state.get("intent") == "UPDATE_EMAIL":
                 state["final_response"] = f"Customer {result.get('customer_id')} email updated successfully."
             elif state.get("intent") == "SEND_NOTIFICATION":
-                state["final_response"] = f"Notification {result.get('notification_id')} sent."
+                state["final_response"] = f"Notification {result.get('notification_id')} recorded (delivery simulated; no external message was sent)."
             else:
                 state["final_response"] = json.dumps(result)
             update_task_status(db, task_id, "COMPLETED", result=result)

@@ -1,22 +1,48 @@
 import json
 import re
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from langgraph.types import Command
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+import hashlib
 from app.database import get_db
 from app.schemas.schemas import TaskRequest, TaskResponse, TaskListResponse, AuditLogResponse, ProviderValidationRequest, ApprovalRequest
-from app.models.database_models import Task, AuditLog
+from app.models.database_models import Task, AuditLog, IdempotencyRecord, TaskOwner
 from app.agent.graph import agent_app
 from app.agent.state import AgentState
-from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key, is_valid_key
+from app.agent.nodes import log_audit, set_runtime_api_key, clear_runtime_api_key, is_valid_key, set_runtime_request, clear_runtime_request
 from app.config import settings
 
 router = APIRouter()
 
 
+def _assert_task_access(db: Session, task_id: int, request: Request) -> None:
+    if not getattr(request.state, "enforce_task_ownership", False):
+        return
+    owner = db.query(TaskOwner).filter(
+        TaskOwner.task_id == task_id,
+        TaskOwner.owner_id == request.state.actor_id,
+    ).first()
+    if owner is None:
+        # Return 404 rather than disclose whether another user's task exists.
+        raise HTTPException(status_code=404, detail="Task not found")
+
+
+def _task_response(task: Task) -> TaskResponse:
+    return TaskResponse(
+        task_id=task.id,
+        status=task.status,
+        intent=task.intent,
+        selected_tool=task.intent,
+        parameters=json.loads(task.parameters) if task.parameters else {},
+        result=json.loads(task.result) if task.result else None,
+        requires_human=task.requires_human,
+    )
+
+
 def _redact_sensitive_text(value: str) -> str:
-    value = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED_SSN]", value)
-    value = re.sub(r"\b\d{4}(?:[- ]\d{4}){3}\b", "[REDACTED_CARD_NUMBER]", value)
+    value = re.sub(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)", "[REDACTED_SSN]", value)
+    value = re.sub(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", "[REDACTED_CARD_NUMBER]", value)
     value = re.sub(
         r"(?i)(credit\s*card|card number|card|cc)(\D{0,30})(?:\d[ -]?){13,19}\b",
         lambda match: match.group(1) + match.group(2) + "[REDACTED_CARD_NUMBER]",
@@ -77,7 +103,7 @@ def validate_provider(req: ProviderValidationRequest):
         raise HTTPException(status_code=401, detail="Provider connection failed; verify the provider and key.")
 
 @router.post("/tasks", response_model=TaskResponse)
-def create_task(req: TaskRequest, db: Session = Depends(get_db)):
+def create_task(req: TaskRequest, request: Request, db: Session = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
     req_text = req.get_request_text().strip()
     if not req_text:
         raise HTTPException(status_code=422, detail="Request text must not be empty.")
@@ -97,17 +123,51 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
             detail="A provider API key is required; deterministic offline mode is disabled.",
         )
 
+    request_hash = hashlib.sha256(
+        json.dumps({"request": req_text, "provider": req.provider, "actor_id": getattr(request.state, "actor_id", "operator")}, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip()
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", idempotency_key):
+            raise HTTPException(status_code=422, detail="Idempotency-Key must be 8-128 safe ASCII characters.")
+        existing = db.query(IdempotencyRecord).filter(IdempotencyRecord.key == idempotency_key).first()
+        if existing:
+            if existing.request_hash != request_hash:
+                raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different request.")
+            existing_task = db.query(Task).filter(Task.id == existing.task_id).first()
+            if existing_task is None:
+                raise HTTPException(status_code=409, detail="Idempotency record is incomplete; inspect task recovery logs.")
+            _assert_task_access(db, existing_task.id, request)
+            return _task_response(existing_task)
+
     task = Task(user_request=_redact_sensitive_text(req_text), status="PENDING")
     db.add(task)
-    db.commit()
+    try:
+        db.flush()
+        if getattr(request.state, "enforce_task_ownership", False):
+            db.add(TaskOwner(task_id=task.id, owner_id=request.state.actor_id))
+        if idempotency_key is not None:
+            db.add(IdempotencyRecord(key=idempotency_key, request_hash=request_hash, task_id=task.id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key is not None:
+            existing = db.query(IdempotencyRecord).filter(IdempotencyRecord.key == idempotency_key).first()
+            if existing and existing.request_hash == request_hash:
+                existing_task = db.query(Task).filter(Task.id == existing.task_id).first()
+                if existing_task is not None:
+                    _assert_task_access(db, existing_task.id, request)
+                    return _task_response(existing_task)
+            if existing:
+                raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different request.")
+        raise
     db.refresh(task)
-    
     log_audit(db, task.id, "TASK_CREATED", "SUCCESS")
 
     # Block high-confidence PII before it enters a checkpoint or model prompt.
     contains_sensitive_pii = bool(
-        re.search(r"\b\d{4}(?:[- ]\d{4}){3}\b", req_text)
-        or re.search(r"\b\d{3}-\d{2}-\d{4}\b", req_text)
+        re.search(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", req_text)
+        or re.search(r"(?<!\d)\d{3}[- ]?\d{2}[- ]?\d{4}(?!\d)", req_text)
         or re.search(r"(?i)(credit\s*card|card number|card|cc)(\D{0,30})(?:\d[ -]?){13,19}\b", req_text)
     )
     if contains_sensitive_pii:
@@ -133,7 +193,7 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     # However, since they want "WAITING_FOR_APPROVAL", a synchronous block would be okay.
     state: AgentState = {
         "task_id": task.id,
-        "user_request": req_text,
+        "user_request": _redact_sensitive_text(req_text),
         "provider": req.provider,
         "intent": None,
         "parameters": None,
@@ -149,12 +209,14 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     
     # Run the graph synchronously
     set_runtime_api_key(task.id, provider_key)
+    set_runtime_request(task.id, req_text)
     try:
         result_state = agent_app.invoke(
             state, config={"configurable": {"thread_id": str(task.id)}}
         )
     finally:
         clear_runtime_api_key(task.id)
+        clear_runtime_request(task.id)
     
     # Refresh task from DB
     db.commit()
@@ -183,15 +245,19 @@ def create_task(req: TaskRequest, db: Session = Depends(get_db)):
     )
 
 @router.get("/tasks", response_model=list[TaskListResponse])
-def get_tasks(db: Session = Depends(get_db)):
-    tasks = db.query(Task).order_by(Task.id.desc()).all()
+def get_tasks(request: Request, db: Session = Depends(get_db)):
+    query = db.query(Task)
+    if getattr(request.state, "enforce_task_ownership", False):
+        query = query.join(TaskOwner, TaskOwner.task_id == Task.id).filter(TaskOwner.owner_id == request.state.actor_id)
+    tasks = query.order_by(Task.id.desc()).all()
     return [TaskListResponse(id=t.id, request=t.user_request, intent=t.intent, status=t.status) for t in tasks]
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
-def get_task(task_id: int, db: Session = Depends(get_db)):
+def get_task(task_id: int, request: Request, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    _assert_task_access(db, task_id, request)
         
     res = None
     if task.result:
@@ -210,7 +276,8 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
 
 @router.get("/tasks/{task_id}/logs")
 @router.get("/tasks/{task_id}/audit")
-def get_task_logs(task_id: int, db: Session = Depends(get_db)):
+def get_task_logs(task_id: int, request: Request, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     logs = db.query(AuditLog).filter(AuditLog.task_id == task_id).order_by(AuditLog.id.asc()).all()
     return [
         {
@@ -223,7 +290,8 @@ def get_task_logs(task_id: int, db: Session = Depends(get_db)):
     ]
 
 @router.post("/tasks/{task_id}/approve")
-def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+def approve_task(task_id: int, request: Request, req: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     if req and req.api_key and not is_valid_key(req.api_key.strip()):
         raise HTTPException(status_code=422, detail="A valid provider API key is required.")
 
@@ -275,7 +343,8 @@ def approve_task(task_id: int, req: ApprovalRequest | None = None, db: Session =
 
 
 @router.post("/tasks/{task_id}/reject")
-def reject_task(task_id: int, db: Session = Depends(get_db)):
+def reject_task(task_id: int, request: Request, db: Session = Depends(get_db)):
+    _assert_task_access(db, task_id, request)
     # Same atomic claim as approval; each task can receive only one decision.
     claimed = (
         db.query(Task)
@@ -316,7 +385,9 @@ def reject_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.get('/database')
-def get_database_state(db: Session = Depends(get_db)):
+def get_database_state(request: Request, db: Session = Depends(get_db)):
+    if getattr(request.state, "enforce_task_ownership", False) and not getattr(request.state, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Database explorer requires an admin API identity.")
     from app.models.database_models import Customer, Order, SupportTicket, Notification
     customers = db.query(Customer).all()
     orders = db.query(Order).all()

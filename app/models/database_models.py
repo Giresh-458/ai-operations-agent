@@ -63,3 +63,20 @@ class AuditLog(Base):
     status = Column(String)
     details = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class IdempotencyRecord(Base):
+    """Maps a client idempotency key to one task and request fingerprint."""
+    __tablename__ = "idempotency_records"
+    key = Column(String(128), primary_key=True)
+    request_hash = Column(String(64), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class TaskOwner(Base):
+    """Associates a task with the identity that created it when scoped tokens are enabled."""
+    __tablename__ = "task_owners"
+    task_id = Column(Integer, ForeignKey("tasks.id"), primary_key=True)
+    owner_id = Column(String(128), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
